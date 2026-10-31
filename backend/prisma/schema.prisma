@@ -1,0 +1,317 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MediaAssetStatus {
+  PENDING
+  ACTIVE
+  RETIRED
+  FAILED
+}
+
+enum EnquiryStatus {
+  RECEIVED
+  EMAILED
+  EMAIL_FAILED
+}
+
+enum AdminRole {
+  ADMIN
+  EDITOR
+}
+
+enum ImportRunType {
+  BASELINE_CMS
+  EXCEL_RECONCILIATION
+}
+
+enum ImportRunStatus {
+  PREVIEWED
+  APPLYING
+  APPLIED
+  FAILED
+  ROLLED_BACK
+}
+
+enum ImportClassification {
+  BASELINE_RECORD
+  CONFIRMED_MATCH
+  POSSIBLE_MATCH
+  NEW_CANDIDATE
+  CONFLICT
+  NEEDS_MANUAL_REVIEW
+}
+
+enum ImportDecisionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  APPLIED
+  FAILED
+}
+
+model Enquiry {
+  id         String        @id @default(cuid())
+  // "rfq" | "technical" | "bespoke" | "delivery" | "general"
+  type       String
+  fullname   String
+  company    String
+  email      String
+  phone      String
+  model      String?
+  message    String
+  status     EnquiryStatus @default(RECEIVED)
+  emailError String?
+  // Stored for abuse investigation only; never exposed publicly
+  ip         String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@index([status, createdAt])
+}
+
+model CareerApplication {
+  id           String        @id @default(cuid())
+  fullname     String
+  email        String
+  position     String
+  phone        String
+  city         String
+  experience   String
+  organization String
+  notice       String
+  skills       String
+  linkedin     String?
+  statement    String
+  // Binary is not stored — only original filename and size for audit trail
+  resumeName   String?
+  resumeSizeKb Int?
+  status       EnquiryStatus @default(RECEIVED)
+  emailError   String?
+  ip           String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([status, createdAt])
+}
+
+model ConnectionTest {
+  id        Int      @id @default(autoincrement())
+  message   String
+  createdAt DateTime @default(now())
+}
+
+model Oem {
+  id         String     @id
+  name       String
+  websiteUrl String?
+  visible    Boolean    @default(true)
+  sortOrder  Int        @default(0)
+  sourceData Json?
+  version    Int        @default(1)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  categories Category[]
+  seoEntries SeoEntry[]
+
+  @@index([visible, sortOrder, id])
+}
+
+model Category {
+  id         String    @id
+  oemId      String
+  name       String
+  visible    Boolean   @default(true)
+  sortOrder  Int       @default(0)
+  sourceData Json?
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  oem        Oem       @relation(fields: [oemId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  products   Product[]
+  seoEntries SeoEntry[]
+
+  @@index([oemId, visible, sortOrder, id])
+}
+
+model Product {
+  id              String         @id
+  categoryId      String
+  name            String
+  description     String?
+  applications    String?
+  externalLink    String?
+  visible         Boolean        @default(true)
+  sortOrder       Int            @default(0)
+  sourceImagePath String?
+  sourceData      Json?
+  version         Int            @default(1)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  category        Category       @relation(fields: [categoryId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  media           ProductMedia[]
+  seoEntries      SeoEntry[]
+
+  @@index([categoryId, visible, sortOrder, id])
+  @@index([visible, sortOrder, id])
+}
+
+model CmsDocument {
+  key       String   @id
+  data      Json
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SeoEntry {
+  id             String    @id @default(cuid())
+  routeKey       String    @unique
+  oemId          String?   @unique
+  categoryId     String?   @unique
+  productId      String?   @unique
+  title          String?
+  description    String?
+  canonicalUrl   String?
+  socialMetadata Json?
+  structuredData Json?
+  sourceData     Json?
+  version        Int       @default(1)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  oem            Oem?      @relation(fields: [oemId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  category       Category? @relation(fields: [categoryId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  product        Product?  @relation(fields: [productId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  // A custom migration CHECK must allow zero or one of oemId, categoryId, productId.
+}
+
+model MediaAsset {
+  id           String           @id @default(cuid())
+  sourcePath   String?
+  r2Key        String?          @unique
+  publicUrl    String?
+  mimeType     String?
+  byteSize     BigInt?
+  sha256       String?          @db.Char(64)
+  status       MediaAssetStatus @default(PENDING)
+  uploadedById String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  uploadedBy   AdminUser?       @relation(fields: [uploadedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  products     ProductMedia[]
+
+  @@index([status, sha256])
+}
+
+model ProductMedia {
+  productId    String
+  mediaAssetId String
+  sortOrder    Int        @default(0)
+  altText      String?
+  isPrimary    Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  product      Product    @relation(fields: [productId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  mediaAsset   MediaAsset @relation(fields: [mediaAssetId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@id([productId, mediaAssetId])
+  @@index([productId, sortOrder])
+  @@index([mediaAssetId])
+  // A custom migration must add a partial unique index on productId where isPrimary is true.
+}
+
+model AdminUser {
+  id                String         @id @default(cuid())
+  email             String         @unique
+  passwordHash      String
+  role              AdminRole      @default(EDITOR)
+  active            Boolean        @default(true)
+  passwordChangedAt DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  sessions          AdminSession[]
+  mediaUploads      MediaAsset[]
+  auditEvents       AuditEvent[]
+  importRuns        ImportRun[]
+}
+
+model AdminSession {
+  id            String    @id @default(cuid())
+  adminUserId   String
+  tokenHash     String    @unique @db.Char(64)
+  csrfTokenHash String    @db.Char(64)
+  absoluteExpiresAt DateTime
+  lastSeenAt    DateTime  @default(now())
+  revokedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  adminUser     AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([adminUserId, absoluteExpiresAt])
+  @@index([absoluteExpiresAt])
+  @@index([lastSeenAt])
+}
+
+model AuditEvent {
+  id          String     @id @default(cuid())
+  adminUserId String?
+  action      String
+  entityType  String
+  entityId    String?
+  requestId   String?
+  beforeData  Json?
+  afterData   Json?
+  createdAt   DateTime   @default(now())
+  adminUser   AdminUser? @relation(fields: [adminUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([entityType, entityId, createdAt])
+  @@index([adminUserId, createdAt])
+}
+
+model ImportRun {
+  id                String         @id @default(cuid())
+  type              ImportRunType
+  status            ImportRunStatus @default(PREVIEWED)
+  sourceFingerprint String
+  startedById       String?
+  summary           Json?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  startedBy         AdminUser?     @relation(fields: [startedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  items             ImportItem[]
+
+  @@index([type, status, createdAt])
+}
+
+model ImportItem {
+  id             String    @id @default(cuid())
+  importRunId    String
+  sourceKey      String
+  sourceRow      Int?
+  cmsEntityType  String?
+  cmsEntityId    String?
+  classification ImportClassification
+  decisionStatus ImportDecisionStatus @default(PENDING)
+  currentData    Json?
+  proposedData   Json?
+  error          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  importRun      ImportRun @relation(fields: [importRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([importRunId, sourceKey])
+  @@index([importRunId, decisionStatus])
+  @@index([cmsEntityType, cmsEntityId])
+}

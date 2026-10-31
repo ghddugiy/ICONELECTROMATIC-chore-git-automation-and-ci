@@ -1,0 +1,574 @@
+/* ==========================================================================
+   ICON ELECTROMATIC — Header Hamburger & Sidebar Drawer Styles
+   Clean, modern, responsive drawer with Employee Zone Admin access
+   Supports both Dark Mode (Dark Navy #080D1A) and Light Mode (Clean White #FFFFFF)
+   ========================================================================== */
+
+/* ─── 0. Header Left Cluster (Hamburger & Logo Separation) ───────────────── */
+.header-left-cluster {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+}
+
+@media (max-width: 992px) {
+  .header-left-cluster {
+    gap: 20px;
+  }
+}
+
+@media (max-width: 640px) {
+  .header-left-cluster {
+    gap: 16px;
+  }
+}
+
+/* ─── 1. Header Hamburger Toggle Button ──────────────────────────────────── */
+.header-sidebar-toggle {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+  width: 40px;
+  height: 34px;
+  padding: 0;
+  margin: 0;
+  border-radius: 9px;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  outline: none;
+  flex-shrink: 0;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
+  position: relative;
+  z-index: 10;
+}
+
+.header-sidebar-toggle:hover {
+  border-color: #e11d48;
+  background: rgba(30, 41, 59, 0.95);
+  box-shadow: 0 0 14px rgba(225, 29, 72, 0.35);
+  transform: translateY(-1px);
+}
+
+.header-sidebar-toggle:active {
+  transform: translateY(0);
+}
+
+.header-sidebar-toggle .sidebar-bar {
+  display: block;
+  width: 19px;
+  height: 2px;
+  background: #ffffff;
+  border-radius: 2px;
+  transition: all 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: center;
+}
+
+.header-sidebar-toggle:hover .sidebar-bar:nth-child(2) {
+  background: #e11d48;
+  width: 15px;
+}
+
+.header-sidebar-toggle:hover .sidebar-bar:nth-child(1),
+.header-sidebar-toggle:hover .sidebar-bar:nth-child(3) {
+  background: #60a5fa;
+}
+
+/* Light Theme Header Toggle */
+[data-theme="light"] .header-sidebar-toggle {
+  background: #ffffff;
+  border: 1.5px solid #cbd5e1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .header-sidebar-toggle:hover {
+  border-color: #e11d48;
+  background: #fff5f5;
+  box-shadow: 0 0 14px rgba(225, 29, 72, 0.25);
+}
+
+[data-theme="light"] .header-sidebar-toggle .sidebar-bar {
+  background: #0f172a;
+}
+
+[data-theme="light"] .header-sidebar-toggle:hover .sidebar-bar:nth-child(2) {
+  background: #e11d48;
+}
+
+[data-theme="light"] .header-sidebar-toggle:hover .sidebar-bar:nth-child(1),
+[data-theme="light"] .header-sidebar-toggle:hover .sidebar-bar:nth-child(3) {
+  background: #2563eb;
+}
+
+/* Active State on Toggle Button */
+.header-sidebar-toggle.active {
+  border-color: #e11d48;
+  background: rgba(225, 29, 72, 0.15);
+}
+
+.header-sidebar-toggle.active .sidebar-bar:nth-child(1) {
+  transform: translateY(7px) rotate(45deg);
+  background: #e11d48;
+}
+
+.header-sidebar-toggle.active .sidebar-bar:nth-child(2) {
+  opacity: 0;
+  transform: scaleX(0);
+}
+
+.header-sidebar-toggle.active .sidebar-bar:nth-child(3) {
+  transform: translateY(-7px) rotate(-45deg);
+  background: #e11d48;
+}
+
+/* ─── 2. Sidebar Drawer Overlay (Backdrop) ────────────────────────────────── */
+.sidebar-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  background: rgba(3, 7, 18, 0.7);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  z-index: 99999998;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.32s ease, visibility 0.32s ease;
+}
+
+.sidebar-drawer-overlay.open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+[data-theme="light"] .sidebar-drawer-overlay {
+  background: rgba(15, 23, 42, 0.45);
+}
+
+/* ─── 3. Sidebar Drawer Container (Slides in from Left to Right) ────────── */
+.sidebar-drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: auto;
+  width: 380px;
+  max-width: 88vw;
+  height: 100vh;
+  height: 100dvh;
+  z-index: 99999999;
+  background: #080d1a; /* Dark Navy Brand Background */
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+  border-left: none;
+  box-shadow: 10px 0 35px rgba(0, 0, 0, 0.75);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(-105%);
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.35s ease;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.sidebar-drawer.open {
+  transform: translateX(0);
+  box-shadow: 15px 0 50px rgba(0, 0, 0, 0.85);
+}
+
+/* Light Theme Drawer Container */
+[data-theme="light"] .sidebar-drawer {
+  background: #ffffff; /* Clean White Background */
+  border-right: 1px solid #e2e8f0;
+  border-left: none;
+  box-shadow: 10px 0 35px rgba(15, 23, 42, 0.12);
+}
+
+[data-theme="light"] .sidebar-drawer.open {
+  box-shadow: 15px 0 50px rgba(15, 23, 42, 0.18);
+}
+
+/* Lock page scroll when drawer is open */
+body.sidebar-drawer-open {
+  overflow: hidden !important;
+}
+
+/* ─── 4. Drawer Header: Logo & Close Button ───────────────────────────────── */
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(13, 21, 38, 0.6);
+  flex-shrink: 0;
+}
+
+[data-theme="light"] .drawer-header {
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.drawer-logo {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 0;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0;
+  box-shadow: none !important;
+  transition: transform 0.2s ease;
+}
+
+.drawer-logo:hover {
+  transform: scale(1.02);
+  box-shadow: none !important;
+}
+
+.drawer-logo img {
+  height: 38px;
+  max-height: 38px;
+  width: auto;
+  object-fit: contain;
+  display: block;
+  filter: none !important;
+}
+
+[data-theme="light"] .drawer-logo {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.drawer-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #cbd5e1;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.22s ease;
+}
+
+.drawer-close-btn:hover {
+  background: #e11d48;
+  border-color: #e11d48;
+  color: #ffffff;
+  transform: rotate(90deg);
+  box-shadow: 0 0 12px rgba(225, 29, 72, 0.45);
+}
+
+[data-theme="light"] .drawer-close-btn {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+}
+
+[data-theme="light"] .drawer-close-btn:hover {
+  background: #e11d48;
+  border-color: #e11d48;
+  color: #ffffff;
+}
+
+/* ─── 5. Drawer Nav Links ────────────────────────────────────────────────── */
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(225, 29, 72, 0.4) transparent;
+}
+
+.drawer-body::-webkit-scrollbar {
+  width: 5px;
+}
+
+.drawer-body::-webkit-scrollbar-thumb {
+  background: rgba(225, 29, 72, 0.4);
+  border-radius: 4px;
+}
+
+.drawer-section-heading {
+  display: none;
+}
+
+.drawer-nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: #cbd5e1;
+  text-decoration: none;
+  font-family: var(--font-display, inherit);
+  font-size: 0.92rem;
+  font-weight: 500;
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  background: transparent;
+  border: 1px solid transparent;
+  position: relative;
+}
+
+.drawer-nav-item-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.drawer-nav-item .drawer-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #60a5fa;
+  font-size: 0.85rem;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.drawer-nav-item .drawer-chevron {
+  font-size: 0.72rem;
+  color: #64748b;
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.drawer-nav-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  transform: translateX(3px);
+}
+
+.drawer-nav-item:hover .drawer-icon {
+  background: rgba(37, 99, 235, 0.25);
+  color: #93c5fd;
+}
+
+.drawer-nav-item:hover .drawer-chevron {
+  color: #e11d48;
+  transform: translateX(2px);
+}
+
+/* Active Nav State */
+.drawer-nav-item.active {
+  background: rgba(37, 99, 235, 0.15);
+  border-color: rgba(37, 99, 235, 0.4);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.drawer-nav-item.active .drawer-icon {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.drawer-nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3.5px;
+  background: #e11d48;
+  border-radius: 4px;
+}
+
+/* Light Theme Nav Item */
+[data-theme="light"] .drawer-nav-item {
+  color: #1e293b;
+}
+
+[data-theme="light"] .drawer-nav-item .drawer-icon {
+  background: #f1f5f9;
+  color: #2563eb;
+}
+
+[data-theme="light"] .drawer-nav-item .drawer-chevron {
+  color: #94a3b8;
+}
+
+[data-theme="light"] .drawer-nav-item:hover {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #0f172a;
+}
+
+[data-theme="light"] .drawer-nav-item:hover .drawer-icon {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+[data-theme="light"] .drawer-nav-item.active {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+[data-theme="light"] .drawer-nav-item.active .drawer-icon {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+/* ─── 6. Special Employee Zone (Admin Panel) Item ────────────────────────── */
+.drawer-divider {
+  height: 1px;
+  background: linear-gradient(90deg, rgba(225, 29, 72, 0.4), rgba(37, 99, 235, 0.4), transparent);
+  margin: 6px 4px 6px;
+}
+
+[data-theme="light"] .drawer-divider {
+  background: linear-gradient(90deg, rgba(225, 29, 72, 0.3), rgba(37, 99, 235, 0.3), #e2e8f0);
+}
+
+.drawer-employee-item {
+  margin-top: 2px;
+  padding: 9px 12px;
+  background: linear-gradient(135deg, rgba(225, 29, 72, 0.15), rgba(37, 99, 235, 0.1));
+  border: 1.5px solid rgba(225, 29, 72, 0.45) !important;
+  box-shadow: 0 2px 10px rgba(225, 29, 72, 0.15);
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.drawer-employee-item .employee-icon,
+.drawer-employee-item .drawer-icon {
+  background: #e11d48 !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 6px rgba(225, 29, 72, 0.4);
+}
+
+.drawer-employee-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(225, 29, 72, 0.25);
+  color: #fb7185;
+  border: 1px solid rgba(225, 29, 72, 0.45);
+}
+
+.drawer-employee-item:hover {
+  background: linear-gradient(135deg, rgba(225, 29, 72, 0.25), rgba(37, 99, 235, 0.2));
+  border-color: #e11d48 !important;
+  box-shadow: 0 4px 16px rgba(225, 29, 72, 0.4);
+  transform: translateX(3px);
+}
+
+.drawer-employee-item:hover .drawer-employee-badge {
+  background: #e11d48;
+  color: #ffffff;
+}
+
+/* Light Theme Employee Zone */
+[data-theme="light"] .drawer-employee-item {
+  background: linear-gradient(135deg, #fff1f2, #eff6ff);
+  border: 1.5px solid #f87171 !important;
+  box-shadow: 0 2px 8px rgba(225, 29, 72, 0.1);
+}
+
+[data-theme="light"] .drawer-employee-item .drawer-employee-badge {
+  background: #ffe4e6;
+  color: #be123c;
+  border-color: #fca5a5;
+}
+
+[data-theme="light"] .drawer-employee-item:hover {
+  background: linear-gradient(135deg, #ffe4e6, #dbeafe);
+  border-color: #e11d48 !important;
+  box-shadow: 0 4px 14px rgba(225, 29, 72, 0.2);
+}
+
+/* ─── 7. Drawer Footer ───────────────────────────────────────────────────── */
+.drawer-footer {
+  padding: 12px 16px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(13, 21, 38, 0.6);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+[data-theme="light"] .drawer-footer {
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.drawer-footer-cta {
+  width: 100%;
+  padding: 10px 16px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(225, 29, 72, 0.35);
+  border-radius: 8px;
+}
+
+[data-theme="light"] .drawer-footer-meta {
+  color: #64748b;
+}
+
+[data-theme="light"] .drawer-footer-meta a {
+  color: #2563eb;
+}
+
+/* ─── 8. Responsive Adjustments ──────────────────────────────────────────── */
+@media (max-width: 992px) {
+  /* Keep hamburger toggle neatly sized next to theme toggle */
+  .header-sidebar-toggle {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 640px) {
+  .header-sidebar-toggle {
+    width: 38px;
+    height: 32px;
+    gap: 4.5px;
+    margin: 0;
+  }
+  .header-sidebar-toggle .sidebar-bar {
+    width: 17px;
+  }
+  .sidebar-drawer {
+    width: 320px;
+    max-width: 86vw;
+  }
+  .drawer-header {
+    padding: 10px 14px;
+  }
+  .drawer-logo img {
+    height: 32px !important;
+    max-height: 32px !important;
+    width: auto !important;
+    object-fit: contain !important;
+    display: block !important;
+  }
+  .drawer-body {
+    padding: 8px 12px 14px;
+    gap: 2px;
+  }
+  .drawer-nav-item {
+    padding: 7px 10px;
+    font-size: 0.88rem;
+  }
+}
