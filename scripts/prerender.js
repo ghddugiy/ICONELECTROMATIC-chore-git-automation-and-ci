@@ -277,9 +277,9 @@ ${sitemapUrls.map((u) => `  <url>
   const publicSitemapPath = path.join(ROOT_DIR, 'public', 'sitemap.xml');
   const publicFallbackPath = path.join(ROOT_DIR, 'public', 'sitemap.fallback.xml');
   const distFallbackPath = path.join(DIST_DIR, 'sitemap.fallback.xml');
-  fs.writeFileSync(publicSitemapPath, sitemapXml, 'utf-8');
-  fs.writeFileSync(publicFallbackPath, sitemapXml, 'utf-8');
-  fs.writeFileSync(distFallbackPath, sitemapXml, 'utf-8');
+  fs.writeFileSync(publicSitemapPath, sitemapXml.trim() + '\n', 'utf-8');
+  fs.writeFileSync(publicFallbackPath, sitemapXml.trim() + '\n', 'utf-8');
+  fs.writeFileSync(distFallbackPath, sitemapXml.trim() + '\n', 'utf-8');
 
   // Remove dist/sitemap.xml if Vite copied it from public/, allowing Vercel's
   // rewrite rule to route /sitemap.xml to the live dynamic backend (/api/sitemap.xml)

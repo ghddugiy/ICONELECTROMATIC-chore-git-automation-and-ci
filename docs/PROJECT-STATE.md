@@ -1,6 +1,6 @@
 # PROJECT-STATE.md - Icon Electromatic website
 
-Last updated: 2026-10-29
+Last updated: 2026-11-03
 Rule: update this file at the end of every task. Never write passwords, keys or tokens here.
 
 ## Goal
@@ -52,6 +52,7 @@ Stage 3 - Backend and CMS (in progress)
 - [x] Cloudflare R2 future storage architecture documented in `docs/IMAGE-STORAGE-R2-INTEGRATION.md`
 - [x] Admin.js response-shape mismatch fixed: `executeTransferWorkflow()` now reads the unwrapped `ApiService.post()` data object directly; dry-run guard checks `dryRunRes.dryRun` instead of the stripped `.success`/`.data` envelope; execute guard checks `execRes.status` against `['APPLIED','ALREADY_APPLIED']` for accurate failure reporting
 - [x] Catalog database import executed: 15 OEMs, 88 categories, 169 products transferred into PostgreSQL via the Admin CMS in a single atomic transaction (1 ImportRun with APPLIED status)
+- [x] Pre-handover readiness cleanup and verification: stripped leading carriage return and blank line from `public/sitemap.xml`; updated `scripts/prerender.js` with `.trim() + '\n'` to prevent leading whitespace in future builds; verified all 100 tests pass across all 8 backend test suites (including `productSeo.test.js` test 12); confirmed clean frontend production build (169 prerendered HTML product pages, 176 sitemap URLs); validated live dynamic backend `/sitemap.xml` and `/api/sitemap.xml` endpoints (HTTP 200, application/xml, 7 core pages, 169 visible product URLs, zero hash fragments, zero admin routes).
 - [ ] Excel catalog reconciliation import (not performed)
 - Prisma obtains the database URL from `DATABASE_URL`; confirm the actual target database and schema before any migration. Do not include credentials in documentation.
 - A prior `npm audit` reported a high-severity `braces` advisory through nodemon/chokidar, with no compatible patched release available at that time; current status has not been rechecked.
