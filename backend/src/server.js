@@ -10,6 +10,8 @@ import productRoutes from "./routes/products.js";
 import transferRoutes from "./routes/transfer.js";
 import mediaRoutes from "./routes/media.js";
 import enquiriesRoutes from "./routes/enquiries.js";
+import contentRoutes, { createContentRouter, createAdminContentRouter } from "./routes/content.js";
+import { createAdminEnquiriesRouter } from "./routes/adminEnquiries.js";
 import { createSitemapRouter } from "./routes/sitemap.js";
 
 export class CorsForbiddenError extends Error {
@@ -69,6 +71,9 @@ export function createApp({
   authRouter = authRoutes,
   mediaRouter = mediaRoutes,
   sitemapRouter = null,
+  contentRouter = null,
+  adminContentRouter = null,
+  adminEnquiriesRouter = null,
   customRoutes = [],
 } = {}) {
   const app = express();
@@ -140,6 +145,17 @@ export function createApp({
   app.use("/api/catalog/transfer", transferRoutes);
   app.use("/api/media", mediaRouter);
   app.use("/api/enquiries", enquiriesRoutes);
+
+  // Database-backed CMS content routes (public read at /api/content/:pageKey, admin at /api/admin/content/:pageKey)
+  const activeContentRouter = contentRouter || createContentRouter({ prismaClient });
+  const activeAdminContentRouter = adminContentRouter || createAdminContentRouter({ prismaClient });
+  app.use("/api/content", activeContentRouter);
+  app.use("/api/admin/content", activeAdminContentRouter);
+
+  // Authenticated Admin Enquiry Workflow & Communication routes
+  const activeAdminEnquiriesRouter =
+    adminEnquiriesRouter || createAdminEnquiriesRouter({ prismaClient });
+  app.use("/api/admin/enquiries", activeAdminEnquiriesRouter);
 
   // Dynamic sitemap routes (publicly accessible at both /sitemap.xml and /api/sitemap.xml)
   const activeSitemapRouter = sitemapRouter || createSitemapRouter({ prismaClient });

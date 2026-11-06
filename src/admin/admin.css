@@ -1048,5 +1048,179 @@
   margin-top: 2px;
 }
 
+/* ─── Enquiries & RFQ Management ─────────────────────────────────────────── */
+.a-badge-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.a-badge-new { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+.a-badge-assigned { background: #fdf4ff; color: #a21caf; border: 1px solid #f5d0fe; }
+.a-badge-in_progress { background: #fefce8; color: #a16207; border: 1px solid #fef08a; }
+.a-badge-quoted { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+.a-badge-contacted { background: #ecfeff; color: #0e7490; border: 1px solid #a5f3fc; }
+.a-badge-closed { background: #f8fafc; color: #475569; border: 1px solid #e2e8f0; }
+.a-badge-archived { background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; }
 
+.a-badge-region {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.a-badge-india { background: #fff7ed; color: #c2410c; border: 1px solid #ffedd5; }
+.a-badge-singapore { background: #eff6ff; color: #2563eb; border: 1px solid #dbeafe; }
+.a-badge-usa { background: #f0fdf4; color: #16a34a; border: 1px solid #dcfce7; }
+.a-badge-unclassified { background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0; }
 
+.a-enquiries-filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  background: #ffffff;
+  border: 1px solid var(--a-border);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.a-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.a-kpi-card {
+  background: #ffffff;
+  border: 1px solid var(--a-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.a-kpi-card:hover, .a-kpi-card.active {
+  border-color: #2563eb;
+  background: #f8faff;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.08);
+}
+.a-kpi-card h4 {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 0;
+}
+.a-kpi-card p {
+  font-size: 0.75rem;
+  color: var(--a-muted);
+  font-weight: 600;
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* Timeline in modal */
+.a-timeline {
+  position: relative;
+  padding-left: 20px;
+  margin: 16px 0;
+}
+.a-timeline::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 6px;
+  width: 2px;
+  background: #e2e8f0;
+}
+.a-timeline-item {
+  position: relative;
+  margin-bottom: 16px;
+}
+.a-timeline-dot {
+  position: absolute;
+  left: -20px;
+  top: 4px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid #2563eb;
+  box-shadow: 0 0 0 2px #eff6ff;
+}
+.a-timeline-dot.status { border-color: #a855f7; }
+.a-timeline-dot.note { border-color: #f59e0b; }
+.a-timeline-dot.phone { border-color: #10b981; }
+.a-timeline-dot.reply { border-color: #06b6d4; }
+.a-timeline-dot.email { border-color: #3b82f6; }
+
+.a-timeline-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 0.82rem;
+}
+.a-timeline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-weight: 600;
+  color: #0f172a;
+}
+.a-timeline-body {
+  color: #334155;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.a-timeline-meta {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  margin-top: 6px;
+}
+
+.a-badge-sent {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #86efac;
+}
+
+.a-badge-failed {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+.a-timeline-channel {
+  font-size: 0.72rem;
+  color: #64748b;
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+.a-timeline-error {
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  border-radius: 4px;
+  color: #be123c;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}

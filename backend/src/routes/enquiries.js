@@ -17,7 +17,13 @@
 import { Router } from "express";
 import multer from "multer";
 import prisma from "../db.js";
-import { sendEnquiryEmail, sendCareerEmail } from "../services/emailService.js";
+import {
+  sendEnquiryEmail,
+  sendCareerEmail,
+  sendAcknowledgementEmail,
+  formatEnquiryReference,
+  resolveRecipientEmail,
+} from "../services/emailService.js";
 import { asyncHandler } from "../routes/common.js";
 import enquiryRateLimitDefault, {
   createEnquiryRateLimit,
@@ -31,6 +37,12 @@ const ALLOWED_SUBJECT_TYPES = new Set([
   "bespoke",
   "delivery",
   "general",
+]);
+
+const ALLOWED_REGIONS = new Map([
+  ["india", "INDIA"],
+  ["singapore", "SINGAPORE"],
+  ["usa", "USA"],
 ]);
 
 // RFC 5322-simplified email pattern — rejects the most obvious malformed addresses
@@ -104,7 +116,18 @@ function validateEnquiry(body) {
     errors.push("message must be between 10 and 2000 characters.");
   }
 
-  return { errors, fullname, company, email, phone, type, model, message };
+  let region = null;
+  const rawRegion = clean(body.region);
+  if (rawRegion) {
+    const canonical = ALLOWED_REGIONS.get(rawRegion.toLowerCase());
+    if (!canonical) {
+      errors.push("region must be one of: india, singapore, usa.");
+    } else {
+      region = canonical;
+    }
+  }
+
+  return { errors, fullname, company, email, phone, type, model, message, region };
 }
 
 function validateCareerFields(body) {
@@ -202,6 +225,7 @@ export function createEnquiriesRouter({
   prismaClient = prisma,
   emailSendEnquiry = sendEnquiryEmail,
   emailSendCareer = sendCareerEmail,
+  emailSendAcknowledgement = sendAcknowledgementEmail,
   rateLimitMiddleware = enquiryRateLimitDefault,
 } = {}) {
   const router = Router();
@@ -223,7 +247,7 @@ export function createEnquiriesRouter({
         return res.status(200).json({ success: true, id: "honeypot" });
       }
 
-      const { errors, fullname, company, email, phone, type, model, message } =
+      const { errors, fullname, company, email, phone, type, model, message, region } =
         validateEnquiry(req.body);
 
       if (errors.length > 0) {
@@ -234,7 +258,7 @@ export function createEnquiriesRouter({
 
       // Persist before attempting email so we have a record even if email fails.
       const record = await prismaClient.enquiry.create({
-        data: { fullname, company, email, phone, type, model, message, ip },
+        data: { fullname, company, email, phone, type, model, message, region, ip },
       });
 
       const emailResult = await emailSendEnquiry(record);
@@ -248,13 +272,99 @@ export function createEnquiriesRouter({
         },
       });
 
+      const refCode = formatEnquiryReference(record.id);
+      const targetInbox = resolveRecipientEmail(
+        record.region,
+        process.env.CONTACT_EMAIL || "salesiepl@iconelectromatic.com"
+      );
+
+      // Log internal regional sales notification communication record (for both success and failure)
+      if (prismaClient.enquiryCommunication?.create) {
+        try {
+          await prismaClient.enquiryCommunication.create({
+            data: {
+              enquiryId: record.id,
+              type: "EMAIL_OUTBOUND",
+              subject: emailResult.ok
+                ? `Internal Sales Notification Dispatched [Ref: #${refCode}]`
+                : `Internal Sales Notification Failed [Ref: #${refCode}]`,
+              body: emailResult.ok
+                ? `Internal regional sales notification successfully dispatched to ${targetInbox}.`
+                : `Internal regional sales notification failed to dispatch to ${targetInbox}: ${emailResult.error || "Delivery error"}`,
+              metadata: {
+                channel: "INTERNAL_SALES_NOTIFICATION",
+                recipient: targetInbox,
+                resendMessageId: emailResult.id || null,
+                deliveryStatus: emailResult.ok ? "SENT" : "FAILED",
+                error: emailResult.ok ? null : emailResult.error,
+              },
+              authorId: null,
+            },
+          });
+        } catch (commErr) {
+          console.error(
+            "[enquiries] Failed to log internal sales communication audit record:",
+            commErr.message || commErr
+          );
+        }
+      }
+
       if (!emailResult.ok) {
-        // The submission is saved; we still inform the user so they can follow up.
+        // The submission is safely saved in PostgreSQL; inform user of internal dispatch issue.
+        // Internal sales notification failed: do not send customer acknowledgement.
         return res.status(502).json({
           success: false,
           message:
-            "Your enquiry was received but we could not send a confirmation email. Please contact us directly.",
+            "Your enquiry was received but could not be dispatched to our team automatically. Please contact us directly if urgent.",
         });
+      }
+
+      // Check existing communication history before sending an acknowledgement for an enquiry (Duplicate protection).
+      // Note: Must distinguish CUSTOMER_ACKNOWLEDGEMENT from INTERNAL_SALES_NOTIFICATION using metadata.channel!
+      let existingAck = null;
+      if (prismaClient.enquiryCommunication?.findMany) {
+        const existingOutbounds = await prismaClient.enquiryCommunication.findMany({
+          where: {
+            enquiryId: record.id,
+            type: "EMAIL_OUTBOUND",
+          },
+        });
+        existingAck = existingOutbounds.find(
+          (c) => c.metadata && c.metadata.channel === "CUSTOMER_ACKNOWLEDGEMENT"
+        );
+      } else if (prismaClient.enquiryCommunication?.findFirst) {
+        const firstOutbound = await prismaClient.enquiryCommunication.findFirst({
+          where: {
+            enquiryId: record.id,
+            type: "EMAIL_OUTBOUND",
+          },
+        });
+        if (firstOutbound && firstOutbound.metadata?.channel === "CUSTOMER_ACKNOWLEDGEMENT") {
+          existingAck = firstOutbound;
+        }
+      }
+
+      if (!existingAck) {
+        const ackResult = await emailSendAcknowledgement(record);
+
+        if (prismaClient.enquiryCommunication?.create) {
+          await prismaClient.enquiryCommunication.create({
+            data: {
+              enquiryId: record.id,
+              type: "EMAIL_OUTBOUND",
+              subject: `Enquiry Received [Ref: #${refCode}] — ICON Electromatic`,
+              body: `Automated customer acknowledgement email dispatched to ${record.email}.`,
+              metadata: {
+                channel: "CUSTOMER_ACKNOWLEDGEMENT",
+                recipient: record.email,
+                resendMessageId: ackResult.id || null,
+                deliveryStatus: ackResult.ok ? "SENT" : "FAILED",
+                error: ackResult.ok ? null : ackResult.error,
+              },
+              authorId: null,
+            },
+          });
+        }
       }
 
       return res.status(201).json({ success: true, id: record.id });
@@ -344,7 +454,7 @@ export function createEnquiriesRouter({
         return res.status(502).json({
           success: false,
           message:
-            "Your application was received but we could not send a confirmation. Please email your CV directly to our careers address.",
+            "Your application was received but could not be dispatched to our team automatically. Please email your CV directly to our careers address.",
         });
       }
 

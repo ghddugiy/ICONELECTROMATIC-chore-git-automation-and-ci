@@ -1,6 +1,7 @@
 import { CATALOG } from './catalogData.js';
 import { OEM_BLOGS } from './blogData.js';
 import { ImageStorage } from './ImageStorage.js';
+import { ApiService } from './ApiService.js';
 
 const INITIAL_CONTENT = {
   header: {
@@ -657,24 +658,236 @@ const INITIAL_CONTENT = {
   },
 };
 
+// In-memory cache, timestamps, and metadata for database-backed CMS content
+const _memoryCache = new Map();
+const _cacheTimestamps = new Map();
+const _adminMetaCache = new Map();
+const _fetchPromises = new Map();
+const CACHE_TTL_MS = 60 * 1000; // 60 seconds TTL for background revalidation
+
+/**
+ * Fast deterministic hash for comparing local drafts and tracking synchronization status.
+ * @param {object} obj
+ * @returns {string}
+ */
+export function computeDraftHash(obj) {
+  const str = JSON.stringify(obj || {});
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return String(hash);
+}
+
 export const ContentService = {
-  getData(pageKey) {
-    const local = localStorage.getItem(`cms_${pageKey}`);
+  /**
+   * Asynchronously fetch content from the public API (GET /api/content/:pageKey).
+   * Updates in-memory cache and dispatches 'cms-data-updated' event upon arrival.
+   * @param {string} pageKey
+   * @returns {Promise<object>}
+   */
+  async fetchContent(pageKey) {
+    if (!pageKey || typeof pageKey !== 'string') return {};
+    const key = pageKey.trim();
+
+    if (_fetchPromises.has(key)) {
+      return _fetchPromises.get(key);
+    }
+
+    const promise = (async () => {
+      try {
+        const res = await ApiService.get(`/content/${encodeURIComponent(key)}`);
+        if (res && res.success && res.content !== null && typeof res.content === 'object') {
+          _memoryCache.set(key, res.content);
+          _cacheTimestamps.set(key, Date.now());
+
+          try {
+            if (typeof localStorage !== 'undefined') {
+              localStorage.setItem(`cms_${key}`, JSON.stringify(res.content));
+            }
+          } catch (_) {}
+
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent('cms-data-updated', { detail: { pageKey: key, data: res.content } })
+            );
+          }
+          return res.content;
+        }
+      } catch (err) {
+        // Fall back gracefully to local default without crashing the view
+        console.warn(`[ContentService] Could not reach content API for '${key}':`, err.message);
+      }
+      return this.getData(key, false);
+    })().finally(() => {
+      _fetchPromises.delete(key);
+    });
+
+    _fetchPromises.set(key, promise);
+    return promise;
+  },
+
+  /**
+   * Preload an array of content sections into memory from the database.
+   * @param {string[]} pageKeys
+   */
+  async preload(pageKeys = [
+    'header', 'footer', 'home', 'about', 'services', 'contact',
+    'partners', 'blogs', 'projects', 'gallery', 'testimonials', 'seo'
+  ]) {
+    return Promise.allSettled(pageKeys.map((key) => this.fetchContent(key)));
+  },
+
+  /**
+   * Admin-authenticated fetch ensuring the latest PostgreSQL record is loaded into the CMS editor.
+   * Stores updatedAt timestamp for optimistic concurrency checks.
+   * @param {string} pageKey
+   * @returns {Promise<object>}
+   */
+  async loadAdminContent(pageKey) {
+    const key = (pageKey || '').trim();
+    if (!key) return { success: false, error: 'pageKey is required' };
+
+    try {
+      const res = await ApiService.get(`/admin/content/${encodeURIComponent(key)}`);
+      if (res && res.success) {
+        const content = res.content !== null && typeof res.content === 'object'
+          ? res.content
+          : (INITIAL_CONTENT[key] || {});
+
+        _adminMetaCache.set(key, {
+          updatedAt: res.updatedAt || null,
+          updatedBy: res.updatedBy || null,
+          isDefault: res.isDefault,
+        });
+
+        _memoryCache.set(key, content);
+        _cacheTimestamps.set(key, Date.now());
+
+        try {
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem(`cms_${key}`, JSON.stringify(content));
+          }
+        } catch (_) {}
+
+        return {
+          success: true,
+          pageKey: key,
+          content,
+          updatedAt: res.updatedAt,
+          updatedBy: res.updatedBy,
+          isDefault: res.isDefault,
+        };
+      }
+    } catch (err) {
+      console.warn(`[ContentService] Admin load from API failed for '${key}':`, err.message);
+      const fallback = this.getData(key, false);
+      return {
+        success: false,
+        pageKey: key,
+        content: fallback,
+        error: err.message,
+        isFallback: true,
+      };
+    }
+    return {
+      success: true,
+      pageKey: key,
+      content: this.getData(key, false),
+      isFallback: true,
+    };
+  },
+
+  /**
+   * Admin-authenticated save to PostgreSQL via PUT /api/admin/content/:pageKey.
+   * Sends expectedUpdatedAt for optimistic concurrency protection.
+   * @param {string} pageKey
+   * @param {object} data
+   * @returns {Promise<{ success: boolean, pageKey: string, data: object, updatedAt: string }>}
+   */
+  async saveAdminContent(pageKey, data) {
+    const key = (pageKey || '').trim();
+    if (!key) throw new Error('pageKey is required');
+
+    const expectedUpdatedAt = _adminMetaCache.get(key)?.updatedAt || null;
+
+    const res = await ApiService.put(`/admin/content/${encodeURIComponent(key)}`, {
+      content: data,
+      expectedUpdatedAt,
+    });
+
+    if (res && res.success) {
+      _adminMetaCache.set(key, { updatedAt: res.updatedAt });
+      _memoryCache.set(key, data);
+      _cacheTimestamps.set(key, Date.now());
+
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(`cms_${key}`, JSON.stringify(data));
+        }
+      } catch (_) {}
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('cms-data-updated', { detail: { pageKey: key, data } })
+        );
+      }
+      return { success: true, pageKey: key, data, updatedAt: res.updatedAt };
+    }
+
+    const err = new Error(res?.message || 'Failed to save content to database.');
+    if (res?.code === 'CONCURRENT_MODIFICATION') {
+      err.isConflict = true;
+      err.code = res.code;
+    }
+    throw err;
+  },
+
+  /**
+   * Synchronous retrieval with reactive background sync.
+   * Returns memory cache > local cache > authentic default.
+   * @param {string} pageKey
+   * @param {boolean} [triggerSync=true] - whether to initiate background API fetch
+   */
+  getData(pageKey, triggerSync = true) {
+    if (!pageKey) return {};
+
+    // 1. Check in-memory cache
+    if (_memoryCache.has(pageKey)) {
+      const cached = _memoryCache.get(pageKey);
+      // Background TTL revalidation
+      if (triggerSync && typeof window !== 'undefined' && pageKey !== 'products') {
+        const lastFetched = _cacheTimestamps.get(pageKey) || 0;
+        if (Date.now() - lastFetched > CACHE_TTL_MS) {
+          this.fetchContent(pageKey);
+        }
+      }
+      return cached;
+    }
+
+    // 2. Trigger background sync from database if running in a browser
+    if (triggerSync && typeof window !== 'undefined' && pageKey !== 'products') {
+      this.fetchContent(pageKey);
+    }
+
+    // 3. Check browser localStorage
+    const local = typeof localStorage !== 'undefined' ? localStorage.getItem(`cms_${pageKey}`) : null;
     if (local) {
       try {
         const parsed = JSON.parse(local);
         if (pageKey === 'products') {
           if (Array.isArray(parsed)) {
+            _memoryCache.set(pageKey, parsed);
             return parsed;
           }
         } else if (pageKey === 'blogs') {
-          // If cached blogs has structured oemBlogs, return it
           if (parsed && Array.isArray(parsed.oemBlogs)) {
+            _memoryCache.set(pageKey, parsed);
             return parsed;
           }
-          // If parsed is array of oemBlogs (older schema), wrap into current schema
           if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].oemId) {
-            return {
+            const wrapped = {
               heroTitle: 'OEM Technical News, Video Demos & Insights',
               heroSubtitle: 'Direct technical bulletins, video demonstrations, application whitepapers, and product release updates from ICON Electromatic\'s 15 global manufacturing partners.',
               trustBadge1: 'Application Whitepapers & Notes',
@@ -682,19 +895,24 @@ export const ContentService = {
               trustBadge3: 'Direct Manufacturer Bulletins',
               oemBlogs: parsed
             };
+            _memoryCache.set(pageKey, wrapped);
+            return wrapped;
           }
         } else if (pageKey === 'partners') {
           if (parsed && Array.isArray(parsed.partners)) {
+            _memoryCache.set(pageKey, parsed);
             return parsed;
           }
           if (Array.isArray(parsed)) {
-            return {
+            const wrapped = {
               heroTitle: 'Authorized Technology Partners',
               heroLead: 'We represent a diverse portfolio of OEMs across sectors, industries and application.<br />To know more about their products, make an enquiry or request samples just get in touch with us.',
               trustBadge1: '10+ Global Technology Partners',
               trustBadge2: 'Space & Mil-Spec Screening Support',
               partners: parsed
             };
+            _memoryCache.set(pageKey, wrapped);
+            return wrapped;
           }
         } else if (pageKey === 'contact') {
           const defaults = INITIAL_CONTENT.contact;
@@ -707,12 +925,15 @@ export const ContentService = {
           if (!Array.isArray(mergedCareers.experienceLevels)) mergedCareers.experienceLevels = defaults.careers.experienceLevels;
           if (!Array.isArray(mergedCareers.noticeOptions)) mergedCareers.noticeOptions = defaults.careers.noticeOptions;
 
-          return {
+          const merged = {
             ...defaults,
             ...parsed,
             careers: mergedCareers
           };
+          _memoryCache.set(pageKey, merged);
+          return merged;
         } else {
+          _memoryCache.set(pageKey, parsed);
           return parsed;
         }
       } catch (e) {
@@ -848,25 +1069,153 @@ export const ContentService = {
     }
 
     const initial = INITIAL_CONTENT[pageKey] || {};
-    localStorage.setItem(`cms_${pageKey}`, JSON.stringify(initial));
+    _memoryCache.set(pageKey, initial);
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(`cms_${pageKey}`, JSON.stringify(initial));
+      }
+    } catch (_) {}
     return initial;
   },
 
-  saveData(pageKey, data) {
-    localStorage.setItem(`cms_${pageKey}`, JSON.stringify(data));
-    // Dispatch event to inform live subscribers
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('cms-data-updated', { detail: { pageKey, data } }));
+  /**
+   * Save content data with atomic PostgreSQL confirmation before persistent cache update.
+   * Awaits backend persistence and throws on conflict or error.
+   * @param {string} pageKey
+   * @param {object} data
+   * @returns {Promise<object>}
+   */
+  async saveData(pageKey, data) {
+    if (!pageKey) return;
+    const key = pageKey.trim();
+
+    // Persist to PostgreSQL backend first (atomic confirmation)
+    try {
+      const res = await this.saveAdminContent(key, data);
+      return res;
+    } catch (err) {
+      console.error(`[ContentService] Failed to persist '${key}' to backend database:`, err.message);
+      throw err;
     }
   },
 
+  /**
+   * Reset a section to authentic defaults.
+   * @param {string} pageKey
+   */
   resetData(pageKey) {
-    localStorage.removeItem(`cms_${pageKey}`);
-    const fresh = this.getData(pageKey);
+    if (!pageKey) return {};
+    const key = pageKey.trim();
+
+    _memoryCache.delete(key);
+    _cacheTimestamps.delete(key);
+    _adminMetaCache.delete(key);
+
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(`cms_${key}`);
+        localStorage.removeItem(`cms_${key}_synced_hash`);
+        localStorage.removeItem(`cms_${key}_synced_at`);
+      }
+    } catch (_) {}
+
+    const fresh = this.getData(key, false);
+    _memoryCache.set(key, fresh);
+    _cacheTimestamps.set(key, Date.now());
+
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('cms-data-updated', { detail: { pageKey, data: fresh } }));
+      window.dispatchEvent(
+        new CustomEvent('cms-data-updated', { detail: { pageKey: key, data: fresh } })
+      );
     }
     return fresh;
+  },
+
+  /**
+   * Inspect existing browser localStorage for customized CMS drafts and retrieve live DB metadata.
+   * @returns {Promise<Array<{ pageKey: string, localData: object, isModified: boolean, isSynced: boolean, needsMigration: boolean, dbStatus: string, dbUpdatedAt: string|null, sizeBytes: number }>>}
+   */
+  async getLocalStorageDrafts() {
+    if (typeof localStorage === 'undefined') return [];
+    const drafts = [];
+    const knownKeys = ['home', 'about', 'services', 'contact', 'header', 'footer', 'partners', 'blogs', 'projects', 'gallery', 'testimonials', 'seo'];
+
+    for (const key of knownKeys) {
+      const raw = localStorage.getItem(`cms_${key}`);
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw);
+        const currentHash = computeDraftHash(parsed);
+        const syncedHash = localStorage.getItem(`cms_${key}_synced_hash`);
+        const syncedAt = localStorage.getItem(`cms_${key}_synced_at`);
+        const isSynced = syncedHash === currentHash;
+
+        const defaultRaw = JSON.stringify(INITIAL_CONTENT[key] || {});
+        const isModifiedFromDefault = raw !== defaultRaw;
+
+        // Retrieve current database record status
+        let dbStatus = 'uncustomized';
+        let dbUpdatedAt = null;
+        try {
+          const adminRes = await ApiService.get(`/admin/content/${encodeURIComponent(key)}`);
+          if (adminRes && adminRes.success) {
+            dbUpdatedAt = adminRes.updatedAt || null;
+            dbStatus = adminRes.isDefault ? 'uncustomized' : 'customized';
+          }
+        } catch (_) {}
+
+        drafts.push({
+          pageKey: key,
+          localData: parsed,
+          currentHash,
+          isSynced,
+          syncedAt,
+          isModifiedFromDefault,
+          needsMigration: isModifiedFromDefault && !isSynced,
+          dbStatus,
+          dbUpdatedAt,
+          sizeBytes: raw.length,
+        });
+      } catch (_) {}
+    }
+    return drafts;
+  },
+
+  /**
+   * Explicitly migrate local browser drafts into PostgreSQL.
+   * Marks drafts as synchronized upon confirmed save; leaves local drafts intact.
+   * @param {string[]|null} [keysToMigrate=null] - optional subset of keys to migrate
+   * @returns {Promise<{ success: boolean, count: number, migratedKeys: string[], failedKeys: Array<{ pageKey: string, error: string }> }>}
+   */
+  async migrateLocalStorageDrafts(keysToMigrate = null) {
+    const drafts = await this.getLocalStorageDrafts();
+    const candidates = keysToMigrate
+      ? drafts.filter(d => keysToMigrate.includes(d.pageKey))
+      : drafts.filter(d => d.needsMigration);
+
+    const migratedKeys = [];
+    const failedKeys = [];
+
+    for (const draft of candidates) {
+      try {
+        await this.saveAdminContent(draft.pageKey, draft.localData);
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(`cms_${draft.pageKey}_synced_hash`, draft.currentHash);
+          localStorage.setItem(`cms_${draft.pageKey}_synced_at`, new Date().toISOString());
+        }
+        migratedKeys.push(draft.pageKey);
+      } catch (err) {
+        console.error(`[ContentService] Migration failed for '${draft.pageKey}':`, err.message);
+        failedKeys.push({ pageKey: draft.pageKey, error: err.message });
+      }
+    }
+
+    return {
+      success: failedKeys.length === 0,
+      count: migratedKeys.length,
+      migratedKeys,
+      failedKeys,
+    };
   },
 
   /**

@@ -11,7 +11,7 @@ import { ImageStorage } from '../data/ImageStorage.js';
 export function getInquiryDetails() {
   const hash = window.location.hash || '';
   const search = window.location.search || '';
-  
+
   let queryString = '';
   if (hash.includes('?')) {
     queryString = hash.slice(hash.indexOf('?') + 1);
@@ -83,13 +83,13 @@ export function renderContactPage() {
           <!-- Unified Page Header -->
           <div class="page-header-unified" style="margin-bottom:0;">
             <h1 class="page-title-unified" id="contact-page-title">
-              ${isRecruiting 
-                ? (careers.careersTitle || c.careersTitle || 'Join India’s Foremost RF &amp; Microwave Engineering Hub') 
+              ${isRecruiting
+                ? (careers.careersTitle || c.careersTitle || 'Join India’s Foremost RF &amp; Microwave Engineering Hub')
                 : (c.heroTitle || 'Send Us a Message &amp; Request Fast Quotes')}
             </h1>
             <p class="page-lead-unified" id="contact-page-lead">
-              ${isRecruiting 
-                ? (careers.careersLead || c.careersLead || 'Accelerate your career in millimeter-wave technology, defense electronics, and satellite communications. Explore engineering opportunities at ICON Electromatic.') 
+              ${isRecruiting
+                ? (careers.careersLead || c.careersLead || 'Accelerate your career in millimeter-wave technology, defense electronics, and satellite communications. Explore engineering opportunities at ICON Electromatic.')
                 : (c.heroLead || 'Whether you require component data sheets, custom waveguide machining, or volume pricing, our application engineering team in Bengaluru is ready to assist.')}
             </p>
           </div>
@@ -114,21 +114,21 @@ export function renderContactPage() {
           <!-- Form Switcher Tabs -->
         <div class="contact-tabs-wrapper" style="margin-bottom:var(--space-4);">
           <div class="contact-form-tabs" role="tablist">
-            <button 
-              class="contact-tab-btn ${!isRecruiting ? 'active' : ''}" 
-              id="tab-btn-inquiry" 
-              data-tab="inquiry" 
-              role="tab" 
+            <button
+              class="contact-tab-btn ${!isRecruiting ? 'active' : ''}"
+              id="tab-btn-inquiry"
+              data-tab="inquiry"
+              role="tab"
               aria-selected="${!isRecruiting}"
             >
               <i class="fa-solid fa-paper-plane"></i>
               <span>${careers.tabLabelSales || 'Sales &amp; RFQ Inquiry'}</span>
             </button>
-            <button 
-              class="contact-tab-btn ${isRecruiting ? 'active' : ''}" 
-              id="tab-btn-recruiting" 
-              data-tab="recruiting" 
-              role="tab" 
+            <button
+              class="contact-tab-btn ${isRecruiting ? 'active' : ''}"
+              id="tab-btn-recruiting"
+              data-tab="recruiting"
+              role="tab"
               aria-selected="${isRecruiting}"
             >
               <i class="fa-solid fa-user-plus"></i>
@@ -143,7 +143,7 @@ export function renderContactPage() {
         <div class="contact-relay-grid">
           <!-- Left Column: Information Cards (Context-aware) -->
           <div class="contact-relay-info">
-            
+
             <!-- 1A. INQUIRY INFO CARDS (Default) -->
             <div id="inquiry-info-column" style="${isRecruiting ? 'display:none;' : 'display:block;'}">
               <div class="contact-relay-card">
@@ -268,7 +268,7 @@ export function renderContactPage() {
 
           <!-- Right Column: Interactive Forms -->
           <div class="contact-relay-form">
-            
+
             <!-- ═══════════════════════════════════════════════════════════ -->
             <!-- FORM 1: SALES & TECHNICAL RFQ INQUIRY                       -->
             <!-- ═══════════════════════════════════════════════════════════ -->
@@ -301,6 +301,15 @@ export function renderContactPage() {
 
                 <div class="relay-form-row">
                   <div class="relay-field">
+                    <label for="c-region">Target Office / Region *</label>
+                    <select id="c-region" name="region" required>
+                      <option value="" disabled selected>Select an Office...</option>
+                      <option value="india">India (Bengaluru HQ)</option>
+                      <option value="singapore">Singapore Liaison Office</option>
+                      <option value="usa">USA Liaison Office</option>
+                    </select>
+                  </div>
+                  <div class="relay-field">
                     <label for="c-subject">Subject / Inquiry Type</label>
                     <select id="c-subject" name="subject">
                       <option value="rfq" ${subjectVal === 'rfq' ? 'selected' : ''}>Formal Request for Quotation (RFQ)</option>
@@ -310,10 +319,11 @@ export function renderContactPage() {
                       <option value="general" ${subjectVal === 'general' ? 'selected' : ''}>General Corporate Inquiry</option>
                     </select>
                   </div>
-                  <div class="relay-field">
-                    <label for="c-model">Target Model / Frequency Band</label>
-                    <input type="text" id="c-model" name="model" value="${targetModel.replace(/"/g, '&quot;')}" placeholder="e.g. RT/duroid 5880 or ZX60-0433+ (2.4 - 5.8 GHz)" />
-                  </div>
+                </div>
+
+                <div class="relay-field">
+                  <label for="c-model">Target Model / Frequency Band</label>
+                  <input type="text" id="c-model" name="model" value="${targetModel.replace(/"/g, '&quot;')}" placeholder="e.g. RT/duroid 5880 or ZX60-0433+ (2.4 - 5.8 GHz)" />
                 </div>
 
                 <div class="relay-field">
@@ -463,6 +473,7 @@ export function initContactPage() {
   // Form Elements
   const inquiryForm = document.getElementById('contact-full-form');
   const recruitingForm = document.getElementById('recruiting-full-form');
+  const regionSelect = document.getElementById('c-region');
   const messageInput = document.getElementById('c-message');
   const subjectSelect = document.getElementById('c-subject');
   const modelInput = document.getElementById('c-model');
@@ -501,14 +512,14 @@ export function initContactPage() {
     }
 
     if (pageTitle) {
-      pageTitle.innerHTML = isRecruiting 
-        ? (careers.careersTitle || c.careersTitle || 'Join India’s Foremost RF &amp; Microwave Engineering Hub') 
+      pageTitle.innerHTML = isRecruiting
+        ? (careers.careersTitle || c.careersTitle || 'Join India’s Foremost RF &amp; Microwave Engineering Hub')
         : (c.heroTitle || 'Send Us a Message &amp; Request Fast Quotes');
     }
 
     if (pageLead) {
-      pageLead.textContent = isRecruiting 
-        ? (careers.careersLead || c.careersLead || 'Accelerate your career in millimeter-wave technology, defense electronics, and satellite communications. Explore engineering opportunities at ICON Electromatic.') 
+      pageLead.textContent = isRecruiting
+        ? (careers.careersLead || c.careersLead || 'Accelerate your career in millimeter-wave technology, defense electronics, and satellite communications. Explore engineering opportunities at ICON Electromatic.')
         : (c.heroLead || 'Whether you require component data sheets, custom waveguide machining, or volume pricing, our application engineering team in Bengaluru is ready to assist.');
     }
   }
@@ -560,7 +571,7 @@ export function initContactPage() {
   // Synchronize values from hash/search query params
   function syncFormFields() {
     const { subjectVal, targetModel, prefillMessage, activeTab } = getInquiryDetails();
-    
+
     switchTab(activeTab);
 
     if (modelInput && targetModel) {
@@ -602,18 +613,30 @@ export function initContactPage() {
       const submitBtn = document.getElementById('inquiry-submit-btn');
       const errorDiv = document.getElementById('inquiry-form-error');
 
+      if (errorDiv) errorDiv.style.display = 'none';
+
+      const regionVal = (regionSelect?.value || document.getElementById('c-region')?.value || '').trim().toLowerCase();
+      if (!regionVal || !['india', 'singapore', 'usa'].includes(regionVal)) {
+        if (errorDiv) {
+          errorDiv.textContent = 'Please select a regional office (India, Singapore, or USA).';
+          errorDiv.style.display = 'block';
+        }
+        (regionSelect || document.getElementById('c-region'))?.focus();
+        return;
+      }
+
       // Loading state
       if (submitBtn) {
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Sending...';
       }
-      if (errorDiv) errorDiv.style.display = 'none';
 
       const body = {
         fullname: (document.getElementById('c-fullname')?.value || '').trim(),
         company: (document.getElementById('c-company')?.value || '').trim(),
         email: (document.getElementById('c-email')?.value || '').trim(),
         phone: (document.getElementById('c-phone')?.value || '').trim(),
+        region: regionVal,
         subject: (document.getElementById('c-subject')?.value || 'rfq').trim(),
         model: (document.getElementById('c-model')?.value || '').trim(),
         message: (document.getElementById('c-message')?.value || '').trim(),
@@ -788,4 +811,3 @@ export function initContactPage() {
     });
   }
 }
-

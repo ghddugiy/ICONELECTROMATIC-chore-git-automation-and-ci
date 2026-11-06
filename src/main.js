@@ -1,7 +1,7 @@
 /**
  * Main Entry Point — ICON ELECTROMATIC
  */
-import { registerRoute, initRouter, getCurrentPath } from './router.js';
+import { registerRoute, initRouter, getCurrentPath, handleRoute } from './router.js';
 import { renderHeader, renderHeaderInner, initHeader, closeSidebarDrawer, updateDrawerActiveState } from './components/Header.js';
 import { renderFooter } from './components/Footer.js';
 import { renderHomePage, initHomePage } from './pages/Home.js';
@@ -17,6 +17,7 @@ import { initCustomCursor } from './components/CustomCursor.js';
 import { renderAdminPage, initAdminPage } from './admin/Admin.js';
 import { ImageStorage } from './data/ImageStorage.js';
 import { SeoService } from './data/SeoService.js';
+import { ContentService } from './data/ContentService.js';
 
 const app = document.getElementById('app');
 
@@ -88,8 +89,65 @@ registerRoute('/admin', () => {
   initAdminPage();
 });
 
-// Initialize router and components immediately
-ImageStorage.init().finally(() => {
+// Listen for real-time CMS content updates to refresh layout and public page views
+if (typeof window !== 'undefined') {
+  window.addEventListener('cms-data-updated', (e) => {
+    const pageKey = e.detail?.pageKey;
+    const currentPath = getCurrentPath();
+
+    // Never interrupt an active administrator session
+    if (currentPath === '/admin' || currentPath.startsWith('/admin')) {
+      return;
+    }
+
+    if (pageKey === 'header') {
+      const header = document.getElementById('site-header');
+      if (header && header.style.display !== 'none') {
+        header.innerHTML = renderHeaderInner(currentPath);
+        initHeader();
+      }
+      return;
+    }
+
+    if (pageKey === 'footer') {
+      const footer = document.querySelector('.site-footer');
+      if (footer) {
+        footer.outerHTML = renderFooter();
+      }
+      return;
+    }
+
+    // Map content pageKey to active public route
+    const pageRouteMap = {
+      home: '/',
+      about: '/about',
+      services: '/services',
+      contact: '/contact',
+      partners: '/partners',
+      blogs: '/blogs',
+      projects: '/',
+      gallery: '/',
+      testimonials: '/',
+    };
+
+    const targetRoute = pageRouteMap[pageKey];
+    if (
+      targetRoute &&
+      (currentPath === targetRoute || (pageKey === 'blogs' && currentPath === '/blog'))
+    ) {
+      handleRoute();
+    }
+  });
+}
+
+// Initialize components, preload all 12 CMS content modules, and start router
+Promise.allSettled([
+  ImageStorage.init(),
+  ContentService.preload([
+    'header', 'footer', 'home', 'about', 'services', 'contact',
+    'partners', 'blogs', 'projects', 'gallery', 'testimonials', 'seo'
+  ]),
+]).finally(() => {
   initRouter();
   initCustomCursor();
 });

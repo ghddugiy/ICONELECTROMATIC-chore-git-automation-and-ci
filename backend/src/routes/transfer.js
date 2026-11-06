@@ -481,6 +481,9 @@ export function createTransferRouter({
         });
 
         return summary;
+      }, {
+        maxWait: 10000,
+        timeout: 30000,
       });
 
       return res.status(200).json({ success: true, data: transferSummary });

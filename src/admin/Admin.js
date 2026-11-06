@@ -14,10 +14,18 @@ let catalogSaving = false;
 let currentTab = 'dashboard';
 let currentSubTab = 'fields'; // for pages with subtabs (fields vs cards)
 
+// ─── Enquiries Management State ─────────────────────────────────────────────
+let enquiriesData = { items: [], pagination: { page: 1, limit: 25, total: 0, totalPages: 1 } };
+let enquiriesStats = { total: 0, byStatus: {}, byRegion: {} };
+let enquiriesStaff = [];
+let enquiriesFilter = { search: '', region: '', workflowStatus: '', assignedToId: '', page: 1, limit: 25 };
+let enquiriesLoading = false;
+
 // ─── Sidebar navigation config ──────────────────────────────────────────────
 const NAV = [
   { section: 'OVERVIEW' },
   { id: 'dashboard',    icon: 'fa-solid fa-gauge',           label: 'Dashboard' },
+  { id: 'enquiries',    icon: 'fa-solid fa-inbox',           label: 'Enquiries & RFQ' },
   { section: 'PAGES' },
   { id: 'home',         icon: 'fa-solid fa-house',           label: 'Home Page' },
   { id: 'about',        icon: 'fa-solid fa-building',        label: 'About Us' },
@@ -56,6 +64,20 @@ export function initAdminPage() {
       }
       isAuthenticated = true;
       await loadAdminCatalog();
+      try {
+        enquiriesStats = await ApiService.getAdminEnquiryStats();
+      } catch { /* non-blocking */ }
+
+      if (currentTab === 'enquiries') {
+        await loadEnquiriesTabContent();
+      }
+      const contentKeys = [
+        'home', 'about', 'services', 'contact', 'header', 'footer',
+        'partners', 'blogs', 'projects', 'gallery', 'testimonials', 'seo'
+      ];
+      if (contentKeys.includes(currentTab)) {
+        await ContentService.loadAdminContent(currentTab);
+      }
       rerender();
     })
     .catch((error) => {
@@ -172,9 +194,12 @@ function renderShell() {
     if (item.section) {
       return `<div class="a-nav-section">${item.section}</div>`;
     }
+    const isEnquiry = item.id === 'enquiries';
+    const newCount = (isEnquiry && enquiriesStats?.byStatus?.NEW) ? enquiriesStats.byStatus.NEW : 0;
+    const badgeHtml = newCount > 0 ? `<span class="a-badge" style="margin-left:auto;font-size:0.7rem;padding:2px 7px;border-radius:9999px;background:#ef4444;color:#fff;font-weight:700;">${newCount}</span>` : '';
     return `
-      <button class="a-nav-item ${currentTab === item.id ? 'active' : ''}" data-tab="${item.id}">
-        <i class="${item.icon}"></i> ${item.label}
+      <button class="a-nav-item ${currentTab === item.id ? 'active' : ''}" data-tab="${item.id}" style="${isEnquiry ? 'display:flex;align-items:center;' : ''}">
+        <i class="${item.icon}"></i> <span style="flex:1;text-align:left;">${item.label}</span> ${badgeHtml}
       </button>`;
   }).join('');
 
@@ -225,12 +250,48 @@ function renderShell() {
   `;
 }
 
+function renderLoadingTabState(tabName) {
+  const contentEl = document.querySelector('.a-content');
+  if (contentEl) {
+    contentEl.innerHTML = `
+      <div style="padding:48px 24px;text-align:center;color:#64748b;">
+        <i class="fa-solid fa-spinner fa-spin" style="font-size:28px;color:#2563eb;margin-bottom:12px;"></i>
+        <p style="font-size:14px;font-weight:500;">Loading latest content for <strong>${tabName}</strong> from PostgreSQL...</p>
+      </div>
+    `;
+  }
+}
+
 function bindShell() {
-  // Navigation
+  // Navigation with authoritative database content loading
   document.querySelectorAll('.a-nav-item[data-tab]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      currentTab = btn.getAttribute('data-tab');
+    btn.addEventListener('click', async () => {
+      const targetTab = btn.getAttribute('data-tab');
+      currentTab = targetTab;
       currentSubTab = 'fields';
+
+      const contentKeys = [
+        'home', 'about', 'services', 'contact', 'header', 'footer',
+        'partners', 'blogs', 'projects', 'gallery', 'testimonials', 'seo'
+      ];
+
+      if (contentKeys.includes(targetTab)) {
+        renderLoadingTabState(targetTab);
+        try {
+          const res = await ContentService.loadAdminContent(targetTab);
+          if (res && res.error) {
+            showToast(`Notice: Live database load failed (${res.error}). Displaying local copy.`, 'info');
+          }
+        } catch (err) {
+          showToast(`Database load notice: ${err.message}`, 'info');
+        }
+      }
+
+      if (targetTab === 'enquiries') {
+        renderLoadingTabState('enquiries');
+        await loadEnquiriesTabContent();
+      }
+
       rerender();
     });
   });
@@ -313,8 +374,8 @@ export function renderImageUploadField(fieldName, label, currentValue, ctxText =
       <label class="a-label">${label} <span class="a-label-ctx">${ctxText}</span></label>
       <div class="a-img-uploader">
         <div class="a-img-thumb-box" id="thumb-box-${fieldName}">
-          ${hasImg 
-            ? `<img src="${resolved}" class="a-thumb-img" id="thumb-img-${fieldName}" alt="Preview" />` 
+          ${hasImg
+            ? `<img src="${resolved}" class="a-thumb-img" id="thumb-img-${fieldName}" alt="Preview" />`
             : `<div class="a-thumb-empty" id="thumb-empty-${fieldName}"><i class="fa-solid fa-image"></i><span>No image</span></div>`}
         </div>
         <div class="a-img-actions">
@@ -517,40 +578,50 @@ function openModal(title, formHtml, onSave, options = {}) {
     if (e.target.id === 'a-modal-backdrop') closeModal();
   });
 
-  document.getElementById('a-modal-form')?.addEventListener('submit', (e) => {
+  document.getElementById('a-modal-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!saveAction) {
       closeModal();
       return;
     }
+    const submitButton = e.target.querySelector('button[type="submit"]');
+    const originalButtonHtml = submitButton ? submitButton.innerHTML : '';
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Saving...';
+    }
+
     const fd = new FormData(e.target);
     const data = {};
     fd.forEach((v, k) => { data[k] = v; });
-    let result;
+
     try {
-      result = onSave(data);
-    } catch (error) {
-      showToast(`Save failed: ${error.message}`, 'error');
-      return;
-    }
-    if (result && typeof result.then === 'function') {
-      const submitButton = e.target.querySelector('button[type="submit"]');
-      if (submitButton) submitButton.disabled = true;
-      result.then((saved) => {
+      const result = onSave(data);
+      if (result && typeof result.then === 'function') {
+        const saved = await result;
         if (saved === false) {
-          if (submitButton && submitButton.isConnected) submitButton.disabled = false;
+          if (submitButton && submitButton.isConnected) {
+            submitButton.disabled = false;
+            submitButton.innerHTML = originalButtonHtml;
+          }
           return;
         }
-        if (submitButton && submitButton.isConnected) closeModal();
-      }).catch((error) => {
-        console.error('Catalog save failed:', error);
-        if (submitButton && submitButton.isConnected) submitButton.disabled = false;
-      });
-      return;
+      }
+      closeModal();
+      rerender();
+      showToast('Card saved to database successfully!', 'success');
+    } catch (error) {
+      console.error('Modal save failed:', error);
+      if (submitButton && submitButton.isConnected) {
+        submitButton.disabled = false;
+        submitButton.innerHTML = originalButtonHtml;
+      }
+      if (error?.isConflict) {
+        showToast(`Save conflict: ${error.message}`, 'error');
+      } else {
+        showToast(`Save failed: ${error.message}`, 'error');
+      }
     }
-    closeModal();
-    rerender();
-    showToast('Card saved successfully!', 'success');
   });
 }
 
@@ -580,6 +651,7 @@ function renderTabContent() {
     case 'products':     return renderProductsTab();
     case 'partners':     return renderPartnersTab();
     case 'blogs':        return renderBlogsTab();
+    case 'enquiries':    return renderEnquiriesTab();
     default:             return `<p>Section not yet implemented.</p>`;
   }
 }
@@ -591,20 +663,25 @@ function bindTabEvents() {
   // Generic page form submission
   const genericForm = document.getElementById('a-page-form');
   if (genericForm) {
-    genericForm.addEventListener('submit', (e) => {
+    genericForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const fd = new FormData(genericForm);
       const existing = ContentService.getData(currentTab) || {};
       const updated = { ...existing };
       fd.forEach((v, k) => { updated[k] = v; });
-      ContentService.saveData(currentTab, updated);
-      showToast('Page sections saved successfully!', 'success');
-      rerender();
+      try {
+        await ContentService.saveData(currentTab, updated);
+        showToast('Page sections saved to database successfully!', 'success');
+        rerender();
+      } catch (err) {
+        showToast(`Failed to save to database: ${err.message}`, 'error');
+      }
     });
   }
 
   // Bind specific tabs
   switch (currentTab) {
+    case 'dashboard':    bindDashboardTabEvents(); break;
     case 'home':         bindHomeTabEvents(); break;
     case 'about':        bindAboutTabEvents(); break;
     case 'services':     bindServicesTabEvents(); break;
@@ -615,6 +692,7 @@ function bindTabEvents() {
     case 'products':     bindProductsTabEvents(); break;
     case 'partners':     bindPartnersTabEvents(); break;
     case 'blogs':        bindBlogsTabEvents(); break;
+    case 'enquiries':    bindEnquiriesTabEvents(); break;
   }
 }
 
@@ -683,7 +761,129 @@ function renderDashboard() {
         </table>
       </div>
     </div>
+
+    <div class="a-card" style="margin-top:24px;border:1px solid #3b82f6;background:#f0f7ff;">
+      <div class="a-card-header" style="border-bottom:1px solid #bfdbfe;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <h3 style="color:#1e3a8a;"><i class="fa-solid fa-database" style="margin-right:8px;color:#2563eb;"></i>Database Content Synchronization (PostgreSQL)</h3>
+          <p style="color:#1e40af;margin-top:4px;">All non-catalog CMS content (Home, About, Services, Contact, Header, Footer, Blogs, Partners) is backed by PostgreSQL.</p>
+        </div>
+        <button id="btn-migrate-local-drafts" class="a-btn a-btn-primary" style="white-space:nowrap;">
+          <i class="fa-solid fa-cloud-arrow-up" style="margin-right:6px;"></i>Sync Browser Drafts to Database
+        </button>
+      </div>
+      <div style="padding:16px 20px;font-size:13px;color:#334155;">
+        <p style="margin:0 0 8px 0;"><strong>Active Persistence Mode:</strong> Database-Backed (REST API &rarr; PostgreSQL <code>SiteContent</code> table).</p>
+        <p style="margin:0;">Any edits saved in the CMS are sent to <code>PUT /api/admin/content/:pageKey</code> and automatically synchronized with the public website for all visitors across devices.</p>
+      </div>
+    </div>
   `;
+}
+
+function bindDashboardTabEvents() {
+  document.getElementById('btn-migrate-local-drafts')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-migrate-local-drafts');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Inspecting drafts...';
+    }
+
+    try {
+      const drafts = await ContentService.getLocalStorageDrafts();
+      const candidates = drafts.filter((d) => d.needsMigration);
+
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up" style="margin-right:6px;"></i>Sync Browser Drafts to Database';
+      }
+
+      if (candidates.length === 0) {
+        showToast('All browser drafts are already synchronized with PostgreSQL.', 'info');
+        return;
+      }
+
+      // Render Review Modal with draft details and DB collision warnings
+      const rowsHtml = candidates.map((d) => {
+        const isDbCustomized = d.dbStatus === 'customized';
+        // Checked by default only if DB is uncustomized (safe); unchecked if DB has existing data
+        const isChecked = !isDbCustomized ? 'checked' : '';
+        const badge = isDbCustomized
+          ? `<span class="a-badge a-badge-amber" title="Database already has content. Overwriting will replace it."><i class="fa-solid fa-triangle-exclamation" style="margin-right:4px;"></i>DB customized (${d.dbUpdatedAt ? new Date(d.dbUpdatedAt).toLocaleDateString() : 'existing'})</span>`
+          : `<span class="a-badge a-badge-green"><i class="fa-solid fa-check" style="margin-right:4px;"></i>Safe (No DB content)</span>`;
+
+        return `
+          <tr style="border-bottom:1px solid #e2e8f0;">
+            <td style="padding:10px 12px;text-align:center;">
+              <input type="checkbox" class="draft-migrate-checkbox" value="${d.pageKey}" ${isChecked} style="cursor:pointer;" />
+            </td>
+            <td style="padding:10px 12px;">
+              <strong>${d.pageKey.toUpperCase()}</strong>
+            </td>
+            <td style="padding:10px 12px;font-size:12px;color:#64748b;">
+              ${d.sizeBytes} bytes
+            </td>
+            <td style="padding:10px 12px;">
+              ${badge}
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      const modalHtml = `
+        <div style="font-size:13px;color:#334155;margin-bottom:16px;">
+          <p style="margin:0 0 8px 0;">The following customized sections were found in your browser's local storage. Review each section before synchronizing to PostgreSQL.</p>
+          <p style="margin:0;font-size:12px;color:#64748b;">Note: Unchecking a section keeps your local copy without modifying the database.</p>
+        </div>
+        <table style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;background:#ffffff;border-radius:6px;overflow:hidden;margin-bottom:16px;">
+          <thead style="background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:12px;text-align:left;color:#475569;">
+            <tr>
+              <th style="padding:8px 12px;text-align:center;width:40px;">Sync</th>
+              <th style="padding:8px 12px;">Section</th>
+              <th style="padding:8px 12px;">Draft Size</th>
+              <th style="padding:8px 12px;">Database Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+      `;
+
+      openModal('Review & Sync Browser Drafts to Database', modalHtml, async () => {
+        const checkboxes = document.querySelectorAll('.draft-migrate-checkbox:checked');
+        const selectedKeys = Array.from(checkboxes).map(cb => cb.value);
+
+        if (selectedKeys.length === 0) {
+          showToast('No drafts selected for migration.', 'info');
+          return false;
+        }
+
+        const overwriteKeys = candidates
+          .filter(c => selectedKeys.includes(c.pageKey) && c.dbStatus === 'customized')
+          .map(c => c.pageKey);
+
+        if (overwriteKeys.length > 0) {
+          if (!confirm(`Warning: You selected [${overwriteKeys.join(', ')}], which already have customized content in PostgreSQL. Overwrite the database with your local drafts?`)) {
+            return false;
+          }
+        }
+
+        const res = await ContentService.migrateLocalStorageDrafts(selectedKeys);
+        if (res.success) {
+          showToast(`Successfully synchronized ${res.count} section(s) to PostgreSQL!`, 'success');
+        } else {
+          showToast(`Partial sync: ${res.count} section(s) saved, ${res.failedKeys.length} failed.`, 'error');
+        }
+        return true;
+      });
+    } catch (err) {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up" style="margin-right:6px;"></i>Sync Browser Drafts to Database';
+      }
+      showToast(`Failed to inspect drafts: ${err.message}`, 'error');
+    }
+  });
 }
 
 // ─── HOME PAGE EDITOR ────────────────────────────────────────────────────────
@@ -852,11 +1052,11 @@ function bindHomeTabEvents() {
     openModal('Add Hero Stat Figure', `
       <div class="a-field"><label class="a-label">Stat Value (e.g. 4,000+)</label><input class="a-input" name="value" required /></div>
       <div class="a-field" style="margin-top:12px;"><label class="a-label">Label (e.g. PRODUCTS AVAILABLE)</label><input class="a-input" name="label" required /></div>
-    `, (data) => {
+    `, async (data) => {
       const stats = d.stats || [];
       stats.push({ id: 'stat-' + Date.now(), value: data.value, label: data.label });
       d.stats = stats;
-      ContentService.saveData('home', d);
+      await ContentService.saveData('home', d);
     });
   });
 
@@ -867,34 +1067,47 @@ function bindHomeTabEvents() {
       openModal('Edit Hero Stat Figure', `
         <div class="a-field"><label class="a-label">Stat Value</label><input class="a-input" name="value" value="${st.value}" required /></div>
         <div class="a-field" style="margin-top:12px;"><label class="a-label">Label</label><input class="a-input" name="label" value="${st.label}" required /></div>
-      `, (data) => {
+      `, async (data) => {
         d.stats[idx] = { ...st, value: data.value, label: data.label };
-        ContentService.saveData('home', d);
+        await ContentService.saveData('home', d);
       });
     });
   });
 
   document.querySelectorAll('.btn-del-stat').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
-      if (confirm('Delete this stat figure?')) {
+      if (!confirm('Delete this stat figure?')) return;
+      btn.disabled = true;
+      try {
         d.stats.splice(idx, 1);
-        ContentService.saveData('home', d);
+        await ContentService.saveData('home', d);
         rerender();
-        showToast('Stat removed.', '');
+        showToast('Stat removed.', 'info');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to delete stat: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
       }
     });
   });
 
   document.querySelectorAll('.btn-move-stat').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const dir = btn.getAttribute('data-dir');
       const targetIdx = dir === 'up' ? idx - 1 : idx + 1;
-      d.stats = reorderArray(d.stats, idx, targetIdx);
-      ContentService.saveData('home', d);
-      rerender();
-      showToast('Stat order updated!', 'success');
+      btn.disabled = true;
+      try {
+        d.stats = reorderArray(d.stats, idx, targetIdx);
+        await ContentService.saveData('home', d);
+        rerender();
+        showToast('Stat order updated!', 'success');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to move stat: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 
@@ -906,11 +1119,11 @@ function bindHomeTabEvents() {
       <div class="a-field" style="margin-top:12px;"><label class="a-label">Description</label><textarea class="a-textarea" name="desc" required></textarea></div>
       <div class="a-field" style="margin-top:12px;"><label class="a-label">Link Label (e.g. Explore Amplifiers →)</label><input class="a-input" name="linkText" value="Explore →" /></div>
       <div class="a-field" style="margin-top:12px;"><label class="a-label">Link URL (e.g. /products?category=amplifiers)</label><input class="a-input" name="linkUrl" value="/products" /></div>
-    `, (data) => {
+    `, async (data) => {
       const caps = d.capabilities || [];
       caps.push({ id: 'cap-' + Date.now(), ...data });
       d.capabilities = caps;
-      ContentService.saveData('home', d);
+      await ContentService.saveData('home', d);
     });
   });
 
@@ -924,34 +1137,47 @@ function bindHomeTabEvents() {
         <div class="a-field" style="margin-top:12px;"><label class="a-label">Description</label><textarea class="a-textarea" name="desc" required>${cap.desc || ''}</textarea></div>
         <div class="a-field" style="margin-top:12px;"><label class="a-label">Link Label</label><input class="a-input" name="linkText" value="${cap.linkText || 'Explore →'}" /></div>
         <div class="a-field" style="margin-top:12px;"><label class="a-label">Link URL</label><input class="a-input" name="linkUrl" value="${cap.linkUrl || '/products'}" /></div>
-      `, (data) => {
+      `, async (data) => {
         d.capabilities[idx] = { ...cap, ...data };
-        ContentService.saveData('home', d);
+        await ContentService.saveData('home', d);
       });
     });
   });
 
   document.querySelectorAll('.btn-del-cap').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
-      if (confirm('Delete this capability card?')) {
+      if (!confirm('Delete this capability card?')) return;
+      btn.disabled = true;
+      try {
         d.capabilities.splice(idx, 1);
-        ContentService.saveData('home', d);
+        await ContentService.saveData('home', d);
         rerender();
-        showToast('Capability card deleted.', '');
+        showToast('Capability card deleted.', 'info');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to delete capability: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
       }
     });
   });
 
   document.querySelectorAll('.btn-move-cap').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const dir = btn.getAttribute('data-dir');
       const targetIdx = dir === 'up' ? idx - 1 : idx + 1;
-      d.capabilities = reorderArray(d.capabilities, idx, targetIdx);
-      ContentService.saveData('home', d);
-      rerender();
-      showToast('Capability cards reordered!', 'success');
+      btn.disabled = true;
+      try {
+        d.capabilities = reorderArray(d.capabilities, idx, targetIdx);
+        await ContentService.saveData('home', d);
+        rerender();
+        showToast('Capability cards reordered!', 'success');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to move capability: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 }
@@ -1252,7 +1478,7 @@ function bindServicesTabEvents() {
       <div class="a-field span2"><label class="a-label">Slide 1 Caption</label><input class="a-input" name="caption1" /></div>
       ${renderImageUploadField('slide2', 'Slide Image 2 (Optional)', '', 'Second slideshow photo')}
       <div class="a-field span2"><label class="a-label">Slide 2 Caption</label><input class="a-input" name="caption2" /></div>
-    `, (data) => {
+    `, async (data) => {
       const items = d.items || [];
       const slides = [];
       if (data.slide1) slides.push({ image: data.slide1, caption: data.caption1 || '' });
@@ -1274,7 +1500,7 @@ function bindServicesTabEvents() {
         ctaLink: '/products'
       });
       d.items = items;
-      ContentService.saveData('services', d);
+      await ContentService.saveData('services', d);
     });
   });
 
@@ -1297,7 +1523,7 @@ function bindServicesTabEvents() {
         <div class="a-field span2"><label class="a-label">Slide 1 Caption</label><input class="a-input" name="caption1" value="${s1.caption || ''}" /></div>
         ${renderImageUploadField('slide2', 'Slide Image 2', s2.image || '', 'Second slideshow photo')}
         <div class="a-field span2"><label class="a-label">Slide 2 Caption</label><input class="a-input" name="caption2" value="${s2.caption || ''}" /></div>
-      `, (data) => {
+      `, async (data) => {
         const slides = [];
         if (data.slide1) slides.push({ image: data.slide1, caption: data.caption1 || '' });
         if (data.slide2) slides.push({ image: data.slide2, caption: data.caption2 || '' });
@@ -1318,32 +1544,45 @@ function bindServicesTabEvents() {
           tags,
           slides: slides.length ? slides : srv.slides
         };
-        ContentService.saveData('services', d);
+        await ContentService.saveData('services', d);
       });
     });
   });
 
   document.querySelectorAll('.btn-del-srv').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
-      if (confirm('Delete this service block?')) {
+      if (!confirm('Delete this service block?')) return;
+      btn.disabled = true;
+      try {
         d.items.splice(idx, 1);
-        ContentService.saveData('services', d);
+        await ContentService.saveData('services', d);
         rerender();
-        showToast('Service block deleted.', '');
+        showToast('Service block deleted.', 'info');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to delete service block: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
       }
     });
   });
 
   document.querySelectorAll('.btn-move-srv').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const dir = btn.getAttribute('data-dir');
       const targetIdx = dir === 'up' ? idx - 1 : idx + 1;
-      d.items = reorderArray(d.items, idx, targetIdx);
-      ContentService.saveData('services', d);
-      rerender();
-      showToast('Service blocks reordered!', 'success');
+      btn.disabled = true;
+      try {
+        d.items = reorderArray(d.items, idx, targetIdx);
+        await ContentService.saveData('services', d);
+        rerender();
+        showToast('Service blocks reordered!', 'success');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to move service block: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 }
@@ -1421,12 +1660,12 @@ function bindProjectsTabEvents() {
       <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Tags (comma separated)</label><input class="a-input" name="tags" placeholder="GaN SSPA, Cavity Filters, AESA" /></div>
       ${renderImageUploadField('image', 'Project Cover Photo', '', 'Hero hardware photo')}
       <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Description</label><textarea class="a-textarea" name="desc" required></textarea></div>
-    `, (data) => {
+    `, async (data) => {
       const items = d.items || [];
       const tags = (data.tags || '').split(',').map(t => t.trim()).filter(Boolean);
       items.push({ id: 'proj-' + Date.now(), ...data, tags });
       d.items = items;
-      ContentService.saveData('projects', d);
+      await ContentService.saveData('projects', d);
     });
   });
 
@@ -1443,35 +1682,48 @@ function bindProjectsTabEvents() {
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Tags (comma separated)</label><input class="a-input" name="tags" value="${(proj.tags || []).join(', ')}" /></div>
         ${renderImageUploadField('image', 'Project Cover Photo', proj.image || '', 'Hero hardware photo')}
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Description</label><textarea class="a-textarea" name="desc" required>${proj.desc || ''}</textarea></div>
-      `, (data) => {
+      `, async (data) => {
         const tags = (data.tags || '').split(',').map(t => t.trim()).filter(Boolean);
         d.items[idx] = { ...proj, ...data, tags };
-        ContentService.saveData('projects', d);
+        await ContentService.saveData('projects', d);
       });
     });
   });
 
   document.querySelectorAll('.btn-del-proj').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
-      if (confirm('Delete this project card?')) {
+      if (!confirm('Delete this project card?')) return;
+      btn.disabled = true;
+      try {
         d.items.splice(idx, 1);
-        ContentService.saveData('projects', d);
+        await ContentService.saveData('projects', d);
         rerender();
-        showToast('Project deleted.', '');
+        showToast('Project deleted.', 'info');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to delete project: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
       }
     });
   });
 
   document.querySelectorAll('.btn-move-proj').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const dir = btn.getAttribute('data-dir');
       const targetIdx = dir === 'up' ? idx - 1 : idx + 1;
-      d.items = reorderArray(d.items, idx, targetIdx);
-      ContentService.saveData('projects', d);
-      rerender();
-      showToast('Projects reordered!', 'success');
+      btn.disabled = true;
+      try {
+        d.items = reorderArray(d.items, idx, targetIdx);
+        await ContentService.saveData('projects', d);
+        rerender();
+        showToast('Projects reordered!', 'success');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to move project: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 }
@@ -1545,11 +1797,11 @@ function bindGalleryTabEvents() {
       <div class="a-field" style="margin-top:12px;"><label class="a-label">Category (e.g. Semiconductors, Passives, Systems)</label><input class="a-input" name="category" value="Semiconductors" /></div>
       ${renderImageUploadField('image', 'Hardware Photo', '', 'Upload or select image')}
       <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Caption / Description</label><input class="a-input" name="caption" /></div>
-    `, (data) => {
+    `, async (data) => {
       const items = d.items || [];
       items.push({ id: 'gal-' + Date.now(), ...data });
       d.items = items;
-      ContentService.saveData('gallery', d);
+      await ContentService.saveData('gallery', d);
     });
   });
 
@@ -1562,34 +1814,47 @@ function bindGalleryTabEvents() {
         <div class="a-field" style="margin-top:12px;"><label class="a-label">Category</label><input class="a-input" name="category" value="${gal.category || ''}" /></div>
         ${renderImageUploadField('image', 'Hardware Photo', gal.image || '', 'Upload or select image')}
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Caption / Description</label><input class="a-input" name="caption" value="${gal.caption || ''}" /></div>
-      `, (data) => {
+      `, async (data) => {
         d.items[idx] = { ...gal, ...data };
-        ContentService.saveData('gallery', d);
+        await ContentService.saveData('gallery', d);
       });
     });
   });
 
   document.querySelectorAll('.btn-del-gal').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
-      if (confirm('Delete this gallery photo?')) {
+      if (!confirm('Delete this gallery photo?')) return;
+      btn.disabled = true;
+      try {
         d.items.splice(idx, 1);
-        ContentService.saveData('gallery', d);
+        await ContentService.saveData('gallery', d);
         rerender();
-        showToast('Gallery photo deleted.', '');
+        showToast('Gallery photo deleted.', 'info');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to delete photo: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
       }
     });
   });
 
   document.querySelectorAll('.btn-move-gal').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const dir = btn.getAttribute('data-dir');
       const targetIdx = dir === 'up' ? idx - 1 : idx + 1;
-      d.items = reorderArray(d.items, idx, targetIdx);
-      ContentService.saveData('gallery', d);
-      rerender();
-      showToast('Gallery reordered!', 'success');
+      btn.disabled = true;
+      try {
+        d.items = reorderArray(d.items, idx, targetIdx);
+        await ContentService.saveData('gallery', d);
+        rerender();
+        showToast('Gallery reordered!', 'success');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to move photo: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 }
@@ -1667,11 +1932,11 @@ function bindTestimonialsTabEvents() {
       <div class="a-field" style="margin-top:12px;"><label class="a-label">Rating Stars (1-5)</label><input class="a-input" type="number" min="1" max="5" name="stars" value="5" /></div>
       ${renderImageUploadField('avatar', 'Client / OEM Avatar Photo', '', 'Upload avatar or logo')}
       <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Quote Endorsement</label><textarea class="a-textarea" name="quote" required></textarea></div>
-    `, (data) => {
+    `, async (data) => {
       const items = d.items || [];
       items.push({ id: 'test-' + Date.now(), ...data, stars: parseInt(data.stars, 10) || 5 });
       d.items = items;
-      ContentService.saveData('testimonials', d);
+      await ContentService.saveData('testimonials', d);
     });
   });
 
@@ -1687,34 +1952,47 @@ function bindTestimonialsTabEvents() {
         <div class="a-field" style="margin-top:12px;"><label class="a-label">Rating Stars (1-5)</label><input class="a-input" type="number" min="1" max="5" name="stars" value="${t.stars || 5}" /></div>
         ${renderImageUploadField('avatar', 'Client / OEM Avatar Photo', t.avatar || '', 'Upload avatar or logo')}
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Quote Endorsement</label><textarea class="a-textarea" name="quote" required>${t.quote || ''}</textarea></div>
-      `, (data) => {
+      `, async (data) => {
         d.items[idx] = { ...t, ...data, stars: parseInt(data.stars, 10) || 5 };
-        ContentService.saveData('testimonials', d);
+        await ContentService.saveData('testimonials', d);
       });
     });
   });
 
   document.querySelectorAll('.btn-del-test').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
-      if (confirm('Delete this testimonial?')) {
+      if (!confirm('Delete this testimonial?')) return;
+      btn.disabled = true;
+      try {
         d.items.splice(idx, 1);
-        ContentService.saveData('testimonials', d);
+        await ContentService.saveData('testimonials', d);
         rerender();
-        showToast('Testimonial deleted.', '');
+        showToast('Testimonial deleted.', 'info');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to delete testimonial: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
       }
     });
   });
 
   document.querySelectorAll('.btn-move-test').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const dir = btn.getAttribute('data-dir');
       const targetIdx = dir === 'up' ? idx - 1 : idx + 1;
-      d.items = reorderArray(d.items, idx, targetIdx);
-      ContentService.saveData('testimonials', d);
-      rerender();
-      showToast('Testimonials reordered!', 'success');
+      btn.disabled = true;
+      try {
+        d.items = reorderArray(d.items, idx, targetIdx);
+        await ContentService.saveData('testimonials', d);
+        rerender();
+        showToast('Testimonials reordered!', 'success');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to move testimonial: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 }
@@ -1945,7 +2223,7 @@ function renderContactPageEditor() {
             </div>
             <button type="submit" class="a-btn a-btn-primary a-btn-sm"><i class="fa-solid fa-floppy-disk"></i> Save Form Settings</button>
           </div>
-          
+
           <div class="a-form-grid">
             <div class="a-section-divider span2">Top Form Banner &amp; Heading</div>
             <div class="a-field">
@@ -1972,7 +2250,7 @@ function renderContactPageEditor() {
             </div>
 
             <div class="a-section-divider span2">Field Labels, Placeholders &amp; Required Toggles</div>
-            
+
             <!-- Full Name -->
             <div class="a-field">
               <label class="a-label">Full Name Field Label</label>
@@ -2371,11 +2649,11 @@ function bindContactTabEvents() {
   document.getElementById('a-add-preset-btn')?.addEventListener('click', () => {
     openModal('Add Quick Requirement Preset', `
       <div class="a-field"><label class="a-label">Preset Message Text</label><input class="a-input" name="text" placeholder="e.g. Inquiring about High Power GaN Device and Beamforming IC." required /></div>
-    `, (data) => {
+    `, async (data) => {
       const presets = c.presets || [];
       presets.push(data.text);
       c.presets = presets;
-      ContentService.saveData('contact', c);
+      await ContentService.saveData('contact', c);
     });
   });
 
@@ -2385,34 +2663,47 @@ function bindContactTabEvents() {
       const text = c.presets[idx];
       openModal('Edit Requirement Preset', `
         <div class="a-field"><label class="a-label">Preset Message Text</label><input class="a-input" name="text" value="${text}" required /></div>
-      `, (data) => {
+      `, async (data) => {
         c.presets[idx] = data.text;
-        ContentService.saveData('contact', c);
+        await ContentService.saveData('contact', c);
       });
     });
   });
 
   document.querySelectorAll('.btn-del-preset').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
-      if (confirm('Delete this preset?')) {
+      if (!confirm('Delete this preset?')) return;
+      btn.disabled = true;
+      try {
         c.presets.splice(idx, 1);
-        ContentService.saveData('contact', c);
+        await ContentService.saveData('contact', c);
         rerender();
-        showToast('Preset deleted.', '');
+        showToast('Preset deleted.', 'info');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to delete preset: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
       }
     });
   });
 
   document.querySelectorAll('.btn-move-preset').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const dir = btn.getAttribute('data-dir');
       const targetIdx = dir === 'up' ? idx - 1 : idx + 1;
-      c.presets = reorderArray(c.presets, idx, targetIdx);
-      ContentService.saveData('contact', c);
-      rerender();
-      showToast('Presets reordered!', 'success');
+      btn.disabled = true;
+      try {
+        c.presets = reorderArray(c.presets, idx, targetIdx);
+        await ContentService.saveData('contact', c);
+        rerender();
+        showToast('Presets reordered!', 'success');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to move preset: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 
@@ -2420,20 +2711,28 @@ function bindContactTabEvents() {
   function handleCareersFormSave(formId, processFormData) {
     const form = document.getElementById(formId);
     if (!form) return;
-    form.addEventListener('submit', (e) => {
+    form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const currentContact = ContentService.getData('contact') || {};
-      const currentCareers = currentContact.careers || {};
-      const fd = new FormData(form);
-      const updated = { ...currentCareers };
-      fd.forEach((v, k) => { updated[k] = v; });
-      if (processFormData) processFormData(form, updated);
-      currentContact.careers = updated;
-      if (updated.careersTitle) currentContact.careersTitle = updated.careersTitle;
-      if (updated.careersLead) currentContact.careersLead = updated.careersLead;
-      ContentService.saveData('contact', currentContact);
-      rerender();
-      showToast('Careers settings saved successfully!', 'success');
+      const submitBtn = form.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      try {
+        const currentContact = ContentService.getData('contact') || {};
+        const currentCareers = currentContact.careers || {};
+        const fd = new FormData(form);
+        const updated = { ...currentCareers };
+        fd.forEach((v, k) => { updated[k] = v; });
+        if (processFormData) processFormData(form, updated);
+        currentContact.careers = updated;
+        if (updated.careersTitle) currentContact.careersTitle = updated.careersTitle;
+        if (updated.careersLead) currentContact.careersLead = updated.careersLead;
+        await ContentService.saveData('contact', currentContact);
+        rerender();
+        showToast('Careers settings saved successfully!', 'success');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to save careers settings: ' + err.message, 'error');
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
+      }
     });
   }
 
@@ -2470,14 +2769,14 @@ function bindContactTabEvents() {
       <div class="a-field" style="margin-top:12px;"><label class="a-label">Icon Class (FontAwesome)</label><input class="a-input" name="icon" value="fa-solid fa-microchip" required /></div>
       <div class="a-field" style="margin-top:12px;"><label class="a-label">Icon Color (Hex / CSS)</label><input class="a-input" name="iconColor" value="#3b82f6" /></div>
       <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Benefit Description</label><textarea class="a-textarea" name="description" rows="3" required></textarea></div>
-    `, (data) => {
+    `, async (data) => {
       const currentContact = ContentService.getData('contact') || {};
       const currentCareers = currentContact.careers || {};
       const list = currentCareers.benefits || [];
       list.push({ id: 'ben-' + Date.now(), ...data });
       currentCareers.benefits = list;
       currentContact.careers = currentCareers;
-      ContentService.saveData('contact', currentContact);
+      await ContentService.saveData('contact', currentContact);
     });
   });
 
@@ -2494,41 +2793,54 @@ function bindContactTabEvents() {
         <div class="a-field" style="margin-top:12px;"><label class="a-label">Icon Class (FontAwesome)</label><input class="a-input" name="icon" value="${b.icon || 'fa-solid fa-microchip'}" required /></div>
         <div class="a-field" style="margin-top:12px;"><label class="a-label">Icon Color (Hex / CSS)</label><input class="a-input" name="iconColor" value="${b.iconColor || '#3b82f6'}" /></div>
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Benefit Description</label><textarea class="a-textarea" name="description" rows="3" required>${b.description || ''}</textarea></div>
-      `, (data) => {
+      `, async (data) => {
         currentCareers.benefits[idx] = { ...b, ...data };
         currentContact.careers = currentCareers;
-        ContentService.saveData('contact', currentContact);
+        await ContentService.saveData('contact', currentContact);
       });
     });
   });
 
   document.querySelectorAll('.btn-del-benefit').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const currentContact = ContentService.getData('contact') || {};
       const currentCareers = currentContact.careers || {};
-      if (confirm('Delete this benefit card?')) {
+      if (!confirm('Delete this benefit card?')) return;
+      btn.disabled = true;
+      try {
         (currentCareers.benefits || []).splice(idx, 1);
         currentContact.careers = currentCareers;
-        ContentService.saveData('contact', currentContact);
+        await ContentService.saveData('contact', currentContact);
         rerender();
-        showToast('Benefit card deleted.', '');
+        showToast('Benefit card deleted.', 'info');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to delete benefit: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
       }
     });
   });
 
   document.querySelectorAll('.btn-move-benefit').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const dir = btn.getAttribute('data-dir');
       const targetIdx = dir === 'up' ? idx - 1 : idx + 1;
       const currentContact = ContentService.getData('contact') || {};
       const currentCareers = currentContact.careers || {};
-      currentCareers.benefits = reorderArray(currentCareers.benefits || [], idx, targetIdx);
-      currentContact.careers = currentCareers;
-      ContentService.saveData('contact', currentContact);
-      rerender();
-      showToast('Benefits reordered!', 'success');
+      btn.disabled = true;
+      try {
+        currentCareers.benefits = reorderArray(currentCareers.benefits || [], idx, targetIdx);
+        currentContact.careers = currentCareers;
+        await ContentService.saveData('contact', currentContact);
+        rerender();
+        showToast('Benefits reordered!', 'success');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to move benefit: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 
@@ -2536,14 +2848,14 @@ function bindContactTabEvents() {
   document.getElementById('a-add-position-btn')?.addEventListener('click', () => {
     openModal('Add Open Engineering Position', `
       <div class="a-field"><label class="a-label">Position Title</label><input class="a-input" name="title" placeholder="e.g. Senior mmWave Antenna Engineer" required /></div>
-    `, (data) => {
+    `, async (data) => {
       const currentContact = ContentService.getData('contact') || {};
       const currentCareers = currentContact.careers || {};
       const list = currentCareers.positions || [];
       list.push(data.title.trim());
       currentCareers.positions = list;
       currentContact.careers = currentCareers;
-      ContentService.saveData('contact', currentContact);
+      await ContentService.saveData('contact', currentContact);
     });
   });
 
@@ -2556,41 +2868,54 @@ function bindContactTabEvents() {
 
       openModal('Edit Engineering Position', `
         <div class="a-field"><label class="a-label">Position Title</label><input class="a-input" name="title" value="${currentPos || ''}" required /></div>
-      `, (data) => {
+      `, async (data) => {
         currentCareers.positions[idx] = data.title.trim();
         currentContact.careers = currentCareers;
-        ContentService.saveData('contact', currentContact);
+        await ContentService.saveData('contact', currentContact);
       });
     });
   });
 
   document.querySelectorAll('.btn-del-pos').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const currentContact = ContentService.getData('contact') || {};
       const currentCareers = currentContact.careers || {};
-      if (confirm('Delete this position?')) {
+      if (!confirm('Delete this position?')) return;
+      btn.disabled = true;
+      try {
         (currentCareers.positions || []).splice(idx, 1);
         currentContact.careers = currentCareers;
-        ContentService.saveData('contact', currentContact);
+        await ContentService.saveData('contact', currentContact);
         rerender();
-        showToast('Position deleted.', '');
+        showToast('Position deleted.', 'info');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to delete position: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
       }
     });
   });
 
   document.querySelectorAll('.btn-move-pos').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const dir = btn.getAttribute('data-dir');
       const targetIdx = dir === 'up' ? idx - 1 : idx + 1;
       const currentContact = ContentService.getData('contact') || {};
       const currentCareers = currentContact.careers || {};
-      currentCareers.positions = reorderArray(currentCareers.positions || [], idx, targetIdx);
-      currentContact.careers = currentCareers;
-      ContentService.saveData('contact', currentContact);
-      rerender();
-      showToast('Positions reordered!', 'success');
+      btn.disabled = true;
+      try {
+        currentCareers.positions = reorderArray(currentCareers.positions || [], idx, targetIdx);
+        currentContact.careers = currentCareers;
+        await ContentService.saveData('contact', currentContact);
+        rerender();
+        showToast('Positions reordered!', 'success');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to move position: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 
@@ -2598,14 +2923,14 @@ function bindContactTabEvents() {
   document.getElementById('a-add-exp-btn')?.addEventListener('click', () => {
     openModal('Add Experience Level Option', `
       <div class="a-field"><label class="a-label">Experience Bracket Text</label><input class="a-input" name="level" placeholder="e.g. 10+ Years (Chief Technical Officer)" required /></div>
-    `, (data) => {
+    `, async (data) => {
       const currentContact = ContentService.getData('contact') || {};
       const currentCareers = currentContact.careers || {};
       const list = currentCareers.experienceLevels || [];
       list.push(data.level.trim());
       currentCareers.experienceLevels = list;
       currentContact.careers = currentCareers;
-      ContentService.saveData('contact', currentContact);
+      await ContentService.saveData('contact', currentContact);
     });
   });
 
@@ -2618,41 +2943,54 @@ function bindContactTabEvents() {
 
       openModal('Edit Experience Level Option', `
         <div class="a-field"><label class="a-label">Experience Bracket Text</label><input class="a-input" name="level" value="${currentExp || ''}" required /></div>
-      `, (data) => {
+      `, async (data) => {
         currentCareers.experienceLevels[idx] = data.level.trim();
         currentContact.careers = currentCareers;
-        ContentService.saveData('contact', currentContact);
+        await ContentService.saveData('contact', currentContact);
       });
     });
   });
 
   document.querySelectorAll('.btn-del-exp').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const currentContact = ContentService.getData('contact') || {};
       const currentCareers = currentContact.careers || {};
-      if (confirm('Delete this experience level?')) {
+      if (!confirm('Delete this experience level?')) return;
+      btn.disabled = true;
+      try {
         (currentCareers.experienceLevels || []).splice(idx, 1);
         currentContact.careers = currentCareers;
-        ContentService.saveData('contact', currentContact);
+        await ContentService.saveData('contact', currentContact);
         rerender();
-        showToast('Experience level deleted.', '');
+        showToast('Experience level deleted.', 'info');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to delete experience level: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
       }
     });
   });
 
   document.querySelectorAll('.btn-move-exp').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const dir = btn.getAttribute('data-dir');
       const targetIdx = dir === 'up' ? idx - 1 : idx + 1;
       const currentContact = ContentService.getData('contact') || {};
       const currentCareers = currentContact.careers || {};
-      currentCareers.experienceLevels = reorderArray(currentCareers.experienceLevels || [], idx, targetIdx);
-      currentContact.careers = currentCareers;
-      ContentService.saveData('contact', currentContact);
-      rerender();
-      showToast('Experience levels reordered!', 'success');
+      btn.disabled = true;
+      try {
+        currentCareers.experienceLevels = reorderArray(currentCareers.experienceLevels || [], idx, targetIdx);
+        currentContact.careers = currentCareers;
+        await ContentService.saveData('contact', currentContact);
+        rerender();
+        showToast('Experience levels reordered!', 'success');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to move experience level: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 
@@ -2660,14 +2998,14 @@ function bindContactTabEvents() {
   document.getElementById('a-add-notice-btn')?.addEventListener('click', () => {
     openModal('Add Notice Period Option', `
       <div class="a-field"><label class="a-label">Notice Period Text</label><input class="a-input" name="notice" placeholder="e.g. 45 Days" required /></div>
-    `, (data) => {
+    `, async (data) => {
       const currentContact = ContentService.getData('contact') || {};
       const currentCareers = currentContact.careers || {};
       const list = currentCareers.noticeOptions || [];
       list.push(data.notice.trim());
       currentCareers.noticeOptions = list;
       currentContact.careers = currentCareers;
-      ContentService.saveData('contact', currentContact);
+      await ContentService.saveData('contact', currentContact);
     });
   });
 
@@ -2680,41 +3018,54 @@ function bindContactTabEvents() {
 
       openModal('Edit Notice Period Option', `
         <div class="a-field"><label class="a-label">Notice Period Text</label><input class="a-input" name="notice" value="${currentNotc || ''}" required /></div>
-      `, (data) => {
+      `, async (data) => {
         currentCareers.noticeOptions[idx] = data.notice.trim();
         currentContact.careers = currentCareers;
-        ContentService.saveData('contact', currentContact);
+        await ContentService.saveData('contact', currentContact);
       });
     });
   });
 
   document.querySelectorAll('.btn-del-notice').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const currentContact = ContentService.getData('contact') || {};
       const currentCareers = currentContact.careers || {};
-      if (confirm('Delete this notice period option?')) {
+      if (!confirm('Delete this notice period option?')) return;
+      btn.disabled = true;
+      try {
         (currentCareers.noticeOptions || []).splice(idx, 1);
         currentContact.careers = currentCareers;
-        ContentService.saveData('contact', currentContact);
+        await ContentService.saveData('contact', currentContact);
         rerender();
-        showToast('Notice option deleted.', '');
+        showToast('Notice option deleted.', 'info');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to delete notice option: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
       }
     });
   });
 
   document.querySelectorAll('.btn-move-notice').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const dir = btn.getAttribute('data-dir');
       const targetIdx = dir === 'up' ? idx - 1 : idx + 1;
       const currentContact = ContentService.getData('contact') || {};
       const currentCareers = currentContact.careers || {};
-      currentCareers.noticeOptions = reorderArray(currentCareers.noticeOptions || [], idx, targetIdx);
-      currentContact.careers = currentCareers;
-      ContentService.saveData('contact', currentContact);
-      rerender();
-      showToast('Notice options reordered!', 'success');
+      btn.disabled = true;
+      try {
+        currentCareers.noticeOptions = reorderArray(currentCareers.noticeOptions || [], idx, targetIdx);
+        currentContact.careers = currentCareers;
+        await ContentService.saveData('contact', currentContact);
+        rerender();
+        showToast('Notice options reordered!', 'success');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to move notice option: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 }
@@ -3999,25 +4350,35 @@ function bindPartnersTabEvents() {
   const d = ContentService.getData('partners') || {};
   const partners = Array.isArray(d) ? d : (d.partners || []);
 
-  const saveAll = (newPartners) => {
+  const saveAll = async (newPartners) => {
+    let payload;
     if (Array.isArray(d)) {
-      ContentService.saveData('partners', newPartners);
+      payload = newPartners;
     } else {
       d.partners = newPartners;
-      ContentService.saveData('partners', d);
+      payload = d;
     }
+    await ContentService.saveData('partners', payload);
     rerender();
   };
 
-  document.getElementById('a-partners-hero-form')?.addEventListener('submit', (e) => {
+  document.getElementById('a-partners-hero-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const fd = new FormData(e.target);
-    const existing = ContentService.getData('partners') || {};
-    const updated = Array.isArray(existing) ? { partners: existing } : { ...existing };
-    fd.forEach((v, k) => { updated[k] = v; });
-    ContentService.saveData('partners', updated);
-    rerender();
-    showToast('Partners hero banner updated!', 'success');
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+    try {
+      const fd = new FormData(e.target);
+      const existing = ContentService.getData('partners') || {};
+      const updated = Array.isArray(existing) ? { partners: existing } : { ...existing };
+      fd.forEach((v, k) => { updated[k] = v; });
+      await ContentService.saveData('partners', updated);
+      rerender();
+      showToast('Partners hero banner updated!', 'success');
+    } catch (err) {
+      showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to save partners hero: ' + err.message, 'error');
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
   });
 
   document.getElementById('partner-add-btn')?.addEventListener('click', () => {
@@ -4028,12 +4389,12 @@ function bindPartnersTabEvents() {
       ${renderImageUploadField('logoImg', 'Partner Brand Logo', '', 'Transparent PNG/SVG')}
       <div class="a-field" style="margin-top:12px;"><label class="a-label">Official Website URL</label><input class="a-input" name="website" placeholder="https://..." /></div>
       <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Description</label><textarea class="a-textarea" name="description"></textarea></div>
-    `, (data) => {
+    `, async (data) => {
       partners.push({
         id: 'partner-' + Date.now(),
         ...data,
       });
-      saveAll(partners);
+      await saveAll(partners);
       showToast('Partner added.', 'success');
     });
   });
@@ -4049,33 +4410,46 @@ function bindPartnersTabEvents() {
         ${renderImageUploadField('logoImg', 'Partner Brand Logo', p.logoImg || '', 'Transparent PNG/SVG')}
         <div class="a-field" style="margin-top:12px;"><label class="a-label">Official Website URL</label><input class="a-input" name="website" value="${p.website || ''}" /></div>
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Description</label><textarea class="a-textarea" name="description">${p.description || ''}</textarea></div>
-      `, (data) => {
+      `, async (data) => {
         partners[idx] = { ...p, ...data };
-        saveAll(partners);
+        await saveAll(partners);
         showToast('Partner updated.', 'success');
       });
     });
   });
 
   document.querySelectorAll('.partner-del-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
-      if (confirm('Delete this partner?')) {
+      if (!confirm('Delete this partner?')) return;
+      btn.disabled = true;
+      try {
         partners.splice(idx, 1);
-        saveAll(partners);
-        showToast('Partner deleted.', '');
+        await saveAll(partners);
+        showToast('Partner deleted.', 'info');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to delete partner: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
       }
     });
   });
 
   document.querySelectorAll('.btn-move-partner').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const dir = btn.getAttribute('data-dir');
       const targetIdx = dir === 'up' ? idx - 1 : idx + 1;
-      const reordered = reorderArray(partners, idx, targetIdx);
-      saveAll(reordered);
-      showToast('Partners reordered!', 'success');
+      btn.disabled = true;
+      try {
+        const reordered = reorderArray(partners, idx, targetIdx);
+        await saveAll(reordered);
+        showToast('Partners reordered!', 'success');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to move partner: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 }
@@ -4572,9 +4946,9 @@ function bindBlogsTabEvents() {
   const cmsBlogs = getCmsBlogsPayload();
   const oemBlogs = cmsBlogs.oemBlogs || [];
 
-  const saveAndRefresh = (toastMsg = 'Blog updates saved!') => {
+  const saveAndRefresh = async (toastMsg = 'Blog updates saved!') => {
     cmsBlogs.oemBlogs = oemBlogs;
-    ContentService.saveData('blogs', cmsBlogs);
+    await ContentService.saveData('blogs', cmsBlogs);
     rerender();
     showToast(toastMsg, 'success');
   };
@@ -4615,13 +4989,13 @@ function bindBlogsTabEvents() {
       <div class="a-field" style="margin-top:12px;"><label class="a-label">Trust Badge 1 (Whitepapers)</label><input class="a-input" name="trustBadge1" value="${cmsBlogs.trustBadge1 || 'Application Whitepapers & Notes'}" /></div>
       <div class="a-field" style="margin-top:12px;"><label class="a-label">Trust Badge 2 (Videos)</label><input class="a-input" name="trustBadge2" value="${cmsBlogs.trustBadge2 || 'Video Demos & Technical Webinars'}" /></div>
       <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Trust Badge 3 (Bulletins)</label><input class="a-input" name="trustBadge3" value="${cmsBlogs.trustBadge3 || 'Direct Manufacturer Bulletins'}" /></div>
-    `, (data) => {
+    `, async (data) => {
       cmsBlogs.heroTitle = data.heroTitle;
       cmsBlogs.heroSubtitle = data.heroSubtitle;
       cmsBlogs.trustBadge1 = data.trustBadge1;
       cmsBlogs.trustBadge2 = data.trustBadge2;
       cmsBlogs.trustBadge3 = data.trustBadge3;
-      saveAndRefresh('Page hero and badges updated successfully!');
+      await saveAndRefresh('Page hero and badges updated successfully!');
     });
   });
 
@@ -4640,12 +5014,19 @@ function bindBlogsTabEvents() {
 
   // Toggle OEM visibility
   document.querySelectorAll('.btn-toggle-blog-oem-vis').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const oemId = btn.getAttribute('data-oem-id');
       const b = oemBlogs.find(x => x.oemId === oemId);
       if (b) {
-        b.visible = b.visible === false ? true : false;
-        saveAndRefresh(`Tech Hub for ${oemId} is now ${b.visible ? 'visible' : 'hidden'}.`);
+        btn.disabled = true;
+        try {
+          b.visible = b.visible === false ? true : false;
+          await saveAndRefresh(`Tech Hub for ${oemId} is now ${b.visible ? 'visible' : 'hidden'}.`);
+        } catch (err) {
+          showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed: ' + err.message, 'error');
+        } finally {
+          btn.disabled = false;
+        }
       }
     });
   });
@@ -4669,12 +5050,12 @@ function bindBlogsTabEvents() {
             <option value="false" ${b.visible === false ? 'selected' : ''}>Hidden (Draft)</option>
           </select>
         </div>
-      `, (data) => {
+      `, async (data) => {
         b.portalName = data.portalName;
         b.headline = data.headline;
         b.officialWebsite = data.officialWebsite;
         b.visible = data.visible === 'true';
-        saveAndRefresh(`Updated ${oem.name} Hub Profile!`);
+        await saveAndRefresh(`Updated ${oem.name} Hub Profile!`);
       });
     });
   });
@@ -4704,7 +5085,7 @@ function bindBlogsTabEvents() {
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Excerpt / Summary (Card Preview) *</label><textarea class="a-textarea" name="summary" rows="3" required placeholder="Short 2-3 sentence overview for the card preview..."></textarea></div>
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Full Technical Article Body (Rich HTML or Paragraphs)</label><textarea class="a-textarea" name="content" rows="6" placeholder="<p>Full article text, specifications, and engineering details...</p>"></textarea></div>
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Topic Tags (Comma-separated)</label><input class="a-input" name="tags" placeholder="e.g. 77 GHz Radar, RT/duroid, Substrate, Automotive" /></div>
-      `, (data) => {
+      `, async (data) => {
         if (!b.articles) b.articles = [];
         const tagsArr = (data.tags || '').split(',').map(t => t.trim()).filter(Boolean);
         const newArt = {
@@ -4721,7 +5102,7 @@ function bindBlogsTabEvents() {
         };
         b.articles.unshift(newArt);
         expandedBlogOemIds.add(oemId);
-        saveAndRefresh(`Added article "${newArt.title}"!`);
+        await saveAndRefresh(`Added article "${newArt.title}"!`);
       });
     });
   });
@@ -4751,7 +5132,7 @@ function bindBlogsTabEvents() {
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Excerpt / Summary (Card Preview) *</label><textarea class="a-textarea" name="summary" rows="3" required>${art.summary || ''}</textarea></div>
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Full Technical Article Body (Rich HTML or Paragraphs)</label><textarea class="a-textarea" name="content" rows="8">${art.content || ''}</textarea></div>
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Topic Tags (Comma-separated)</label><input class="a-input" name="tags" value="${(art.tags || []).join(', ')}" /></div>
-      `, (data) => {
+      `, async (data) => {
         art.title = data.title.trim();
         art.category = data.category.trim();
         art.date = data.date.trim();
@@ -4762,30 +5143,36 @@ function bindBlogsTabEvents() {
         art.tags = (data.tags || '').split(',').map(t => t.trim()).filter(Boolean);
         art.visible = data.visible === 'true';
         expandedBlogOemIds.add(oemId);
-        saveAndRefresh(`Updated article "${art.title}"!`);
+        await saveAndRefresh(`Updated article "${art.title}"!`);
       });
     });
   });
 
   // Delete Article
   document.querySelectorAll('.btn-del-oem-art').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const oemId = btn.getAttribute('data-oem-id');
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const b = oemBlogs.find(x => x.oemId === oemId);
       const art = b?.articles?.[idx];
       if (!b || !art) return;
 
-      if (confirm(`Delete article "${art.title}"?`)) {
+      if (!confirm(`Delete article "${art.title}"?`)) return;
+      btn.disabled = true;
+      try {
         b.articles.splice(idx, 1);
-        saveAndRefresh(`Deleted article "${art.title}".`);
+        await saveAndRefresh(`Deleted article "${art.title}".`);
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to delete article: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
       }
     });
   });
 
   // Move Article
   document.querySelectorAll('.btn-move-oem-art').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const oemId = btn.getAttribute('data-oem-id');
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const dir = btn.getAttribute('data-dir');
@@ -4793,21 +5180,35 @@ function bindBlogsTabEvents() {
       if (!b || !b.articles) return;
 
       const targetIdx = dir === 'up' ? idx - 1 : idx + 1;
-      b.articles = reorderArray(b.articles, idx, targetIdx);
-      saveAndRefresh('Articles reordered!');
+      btn.disabled = true;
+      try {
+        b.articles = reorderArray(b.articles, idx, targetIdx);
+        await saveAndRefresh('Articles reordered!');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to move article: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 
   // Toggle Article Visibility
   document.querySelectorAll('.btn-toggle-art-vis').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const oemId = btn.getAttribute('data-oem-id');
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const b = oemBlogs.find(x => x.oemId === oemId);
       const art = b?.articles?.[idx];
       if (!art) return;
-      art.visible = art.visible === false ? true : false;
-      saveAndRefresh(`Article "${art.title}" is now ${art.visible ? 'visible' : 'hidden'}.`);
+      btn.disabled = true;
+      try {
+        art.visible = art.visible === false ? true : false;
+        await saveAndRefresh(`Article "${art.title}" is now ${art.visible ? 'visible' : 'hidden'}.`);
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 
@@ -4836,7 +5237,7 @@ function bindBlogsTabEvents() {
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Video Streaming / Embed URL (YouTube, Vimeo, MP4)</label><input class="a-input" name="videoUrl" placeholder="https://..." /></div>
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Session Summary</label><textarea class="a-textarea" name="summary" rows="3" placeholder="Overview of the technical topics demonstrated in the video..."></textarea></div>
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Takeaway Topics (Comma-separated)</label><input class="a-input" name="topics" placeholder="e.g. Sub-THz Metrology, Skin Depth Effects, Microstrip Resonators" /></div>
-      `, (data) => {
+      `, async (data) => {
         if (!b.videos) b.videos = [];
         const topicsArr = (data.topics || '').split(',').map(t => t.trim()).filter(Boolean);
         const newVid = {
@@ -4853,7 +5254,7 @@ function bindBlogsTabEvents() {
         };
         b.videos.unshift(newVid);
         expandedBlogOemIds.add(oemId);
-        saveAndRefresh(`Added video "${newVid.title}"!`);
+        await saveAndRefresh(`Added video "${newVid.title}"!`);
       });
     });
   });
@@ -4883,7 +5284,7 @@ function bindBlogsTabEvents() {
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Video Streaming / Embed URL</label><input class="a-input" name="videoUrl" value="${vid.videoUrl || ''}" /></div>
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Session Summary</label><textarea class="a-textarea" name="summary" rows="3">${vid.summary || ''}</textarea></div>
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Takeaway Topics (Comma-separated)</label><input class="a-input" name="topics" value="${(vid.topics || []).join(', ')}" /></div>
-      `, (data) => {
+      `, async (data) => {
         vid.title = data.title.trim();
         vid.speaker = data.speaker.trim();
         vid.duration = data.duration.trim();
@@ -4894,30 +5295,36 @@ function bindBlogsTabEvents() {
         vid.topics = (data.topics || '').split(',').map(t => t.trim()).filter(Boolean);
         vid.visible = data.visible === 'true';
         expandedBlogOemIds.add(oemId);
-        saveAndRefresh(`Updated video "${vid.title}"!`);
+        await saveAndRefresh(`Updated video "${vid.title}"!`);
       });
     });
   });
 
   // Delete Video
   document.querySelectorAll('.btn-del-oem-vid').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const oemId = btn.getAttribute('data-oem-id');
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const b = oemBlogs.find(x => x.oemId === oemId);
       const vid = b?.videos?.[idx];
       if (!b || !vid) return;
 
-      if (confirm(`Delete video "${vid.title}"?`)) {
+      if (!confirm(`Delete video "${vid.title}"?`)) return;
+      btn.disabled = true;
+      try {
         b.videos.splice(idx, 1);
-        saveAndRefresh(`Deleted video "${vid.title}".`);
+        await saveAndRefresh(`Deleted video "${vid.title}".`);
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to delete video: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
       }
     });
   });
 
   // Move Video
   document.querySelectorAll('.btn-move-oem-vid').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const oemId = btn.getAttribute('data-oem-id');
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const dir = btn.getAttribute('data-dir');
@@ -4925,21 +5332,35 @@ function bindBlogsTabEvents() {
       if (!b || !b.videos) return;
 
       const targetIdx = dir === 'up' ? idx - 1 : idx + 1;
-      b.videos = reorderArray(b.videos, idx, targetIdx);
-      saveAndRefresh('Videos reordered!');
+      btn.disabled = true;
+      try {
+        b.videos = reorderArray(b.videos, idx, targetIdx);
+        await saveAndRefresh('Videos reordered!');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to move video: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 
   // Toggle Video Visibility
   document.querySelectorAll('.btn-toggle-vid-vis').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const oemId = btn.getAttribute('data-oem-id');
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const b = oemBlogs.find(x => x.oemId === oemId);
       const vid = b?.videos?.[idx];
       if (!vid) return;
-      vid.visible = vid.visible === false ? true : false;
-      saveAndRefresh(`Video "${vid.title}" is now ${vid.visible ? 'visible' : 'hidden'}.`);
+      btn.disabled = true;
+      try {
+        vid.visible = vid.visible === false ? true : false;
+        await saveAndRefresh(`Video "${vid.title}" is now ${vid.visible ? 'visible' : 'hidden'}.`);
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 
@@ -4968,7 +5389,7 @@ function bindBlogsTabEvents() {
         </div>
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Executive Summary</label><textarea class="a-textarea" name="summary" rows="3" placeholder="Technical summary of the study..."></textarea></div>
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Key Engineering Findings (One finding per line)</label><textarea class="a-textarea" name="keyFindings" rows="4" placeholder="Direct copper bonded substrates eliminate interface resistances.&#10;Thermal rating up to 170°C for airborne pods."></textarea></div>
-      `, (data) => {
+      `, async (data) => {
         if (!b.whitepapers) b.whitepapers = [];
         const findingsArr = (data.keyFindings || '').split('\n').map(f => f.trim()).filter(Boolean);
         const newWp = {
@@ -4985,7 +5406,7 @@ function bindBlogsTabEvents() {
         };
         b.whitepapers.unshift(newWp);
         expandedBlogOemIds.add(oemId);
-        saveAndRefresh(`Added whitepaper "${newWp.title}"!`);
+        await saveAndRefresh(`Added whitepaper "${newWp.title}"!`);
       });
     });
   });
@@ -5015,7 +5436,7 @@ function bindBlogsTabEvents() {
         </div>
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Executive Summary</label><textarea class="a-textarea" name="summary" rows="3">${wp.summary || ''}</textarea></div>
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Key Engineering Findings (One finding per line)</label><textarea class="a-textarea" name="keyFindings" rows="4">${(wp.keyFindings || []).join('\n')}</textarea></div>
-      `, (data) => {
+      `, async (data) => {
         wp.title = data.title.trim();
         wp.author = data.author.trim();
         wp.date = data.date.trim();
@@ -5026,30 +5447,36 @@ function bindBlogsTabEvents() {
         wp.keyFindings = (data.keyFindings || '').split('\n').map(f => f.trim()).filter(Boolean);
         wp.visible = data.visible === 'true';
         expandedBlogOemIds.add(oemId);
-        saveAndRefresh(`Updated whitepaper "${wp.title}"!`);
+        await saveAndRefresh(`Updated whitepaper "${wp.title}"!`);
       });
     });
   });
 
   // Delete Whitepaper
   document.querySelectorAll('.btn-del-oem-wp').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const oemId = btn.getAttribute('data-oem-id');
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const b = oemBlogs.find(x => x.oemId === oemId);
       const wp = b?.whitepapers?.[idx];
       if (!b || !wp) return;
 
-      if (confirm(`Delete whitepaper "${wp.title}"?`)) {
+      if (!confirm(`Delete whitepaper "${wp.title}"?`)) return;
+      btn.disabled = true;
+      try {
         b.whitepapers.splice(idx, 1);
-        saveAndRefresh(`Deleted whitepaper "${wp.title}".`);
+        await saveAndRefresh(`Deleted whitepaper "${wp.title}".`);
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to delete whitepaper: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
       }
     });
   });
 
   // Move Whitepaper
   document.querySelectorAll('.btn-move-oem-wp').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const oemId = btn.getAttribute('data-oem-id');
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const dir = btn.getAttribute('data-dir');
@@ -5057,21 +5484,35 @@ function bindBlogsTabEvents() {
       if (!b || !b.whitepapers) return;
 
       const targetIdx = dir === 'up' ? idx - 1 : idx + 1;
-      b.whitepapers = reorderArray(b.whitepapers, idx, targetIdx);
-      saveAndRefresh('Whitepapers reordered!');
+      btn.disabled = true;
+      try {
+        b.whitepapers = reorderArray(b.whitepapers, idx, targetIdx);
+        await saveAndRefresh('Whitepapers reordered!');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to move whitepaper: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 
   // Toggle Whitepaper Visibility
   document.querySelectorAll('.btn-toggle-wp-vis').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const oemId = btn.getAttribute('data-oem-id');
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const b = oemBlogs.find(x => x.oemId === oemId);
       const wp = b?.whitepapers?.[idx];
       if (!wp) return;
-      wp.visible = wp.visible === false ? true : false;
-      saveAndRefresh(`Whitepaper "${wp.title}" is now ${wp.visible ? 'visible' : 'hidden'}.`);
+      btn.disabled = true;
+      try {
+        wp.visible = wp.visible === false ? true : false;
+        await saveAndRefresh(`Whitepaper "${wp.title}" is now ${wp.visible ? 'visible' : 'hidden'}.`);
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 
@@ -5089,7 +5530,7 @@ function bindBlogsTabEvents() {
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Official URL *</label><input class="a-input" name="url" required placeholder="https://..." /></div>
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Description</label><textarea class="a-textarea" name="description" rows="2" placeholder="Interactive RF calculator and design suite..."></textarea></div>
         <div class="a-field" style="margin-top:12px;"><label class="a-label">FontAwesome Icon Class</label><input class="a-input" name="icon" value="fa-globe" placeholder="fa-globe, fa-calculator, fa-book-open" /></div>
-      `, (data) => {
+      `, async (data) => {
         if (!b.officialLinks) b.officialLinks = [];
         const newLink = {
           title: data.title.trim(),
@@ -5099,7 +5540,7 @@ function bindBlogsTabEvents() {
         };
         b.officialLinks.push(newLink);
         expandedBlogOemIds.add(oemId);
-        saveAndRefresh(`Added link "${newLink.title}"!`);
+        await saveAndRefresh(`Added link "${newLink.title}"!`);
       });
     });
   });
@@ -5118,36 +5559,42 @@ function bindBlogsTabEvents() {
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Official URL *</label><input class="a-input" name="url" value="${link.url || ''}" required /></div>
         <div class="a-field span2" style="margin-top:12px;"><label class="a-label">Description</label><textarea class="a-textarea" name="description" rows="2">${link.description || ''}</textarea></div>
         <div class="a-field" style="margin-top:12px;"><label class="a-label">FontAwesome Icon Class</label><input class="a-input" name="icon" value="${link.icon || 'fa-globe'}" /></div>
-      `, (data) => {
+      `, async (data) => {
         link.title = data.title.trim();
         link.url = data.url.trim();
         link.description = (data.description || '').trim();
         link.icon = (data.icon || 'fa-globe').trim();
         expandedBlogOemIds.add(oemId);
-        saveAndRefresh(`Updated link "${link.title}"!`);
+        await saveAndRefresh(`Updated link "${link.title}"!`);
       });
     });
   });
 
   // Delete Link
   document.querySelectorAll('.btn-del-oem-link').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const oemId = btn.getAttribute('data-oem-id');
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const b = oemBlogs.find(x => x.oemId === oemId);
       const link = b?.officialLinks?.[idx];
       if (!b || !link) return;
 
-      if (confirm(`Delete official link "${link.title}"?`)) {
+      if (!confirm(`Delete official link "${link.title}"?`)) return;
+      btn.disabled = true;
+      try {
         b.officialLinks.splice(idx, 1);
-        saveAndRefresh(`Deleted link "${link.title}".`);
+        await saveAndRefresh(`Deleted link "${link.title}".`);
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to delete link: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
       }
     });
   });
 
   // Move Link
   document.querySelectorAll('.btn-move-oem-link').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const oemId = btn.getAttribute('data-oem-id');
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const dir = btn.getAttribute('data-dir');
@@ -5155,8 +5602,15 @@ function bindBlogsTabEvents() {
       if (!b || !b.officialLinks) return;
 
       const targetIdx = dir === 'up' ? idx - 1 : idx + 1;
-      b.officialLinks = reorderArray(b.officialLinks, idx, targetIdx);
-      saveAndRefresh('Official links reordered!');
+      btn.disabled = true;
+      try {
+        b.officialLinks = reorderArray(b.officialLinks, idx, targetIdx);
+        await saveAndRefresh('Official links reordered!');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to move link: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 }
@@ -5343,10 +5797,10 @@ function bindUniversalCardActions(pageKey, parentData, arrayPropName, cardType, 
   const cards = parentData[arrayPropName] || [];
 
   document.getElementById(`a-add-${cardType}-btn`)?.addEventListener('click', () => {
-    openModal('Add New Card', renderAddForm(), (data) => {
+    openModal('Add New Card', renderAddForm(), async (data) => {
       cards.push({ id: `${cardType}-${Date.now()}`, ...data });
       parentData[arrayPropName] = cards;
-      ContentService.saveData(pageKey, parentData);
+      await ContentService.saveData(pageKey, parentData);
     });
   });
 
@@ -5354,36 +5808,737 @@ function bindUniversalCardActions(pageKey, parentData, arrayPropName, cardType, 
     btn.addEventListener('click', () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const card = cards[idx];
-      openModal('Edit Card', renderEditForm(card), (data) => {
+      openModal('Edit Card', renderEditForm(card), async (data) => {
         cards[idx] = { ...card, ...data };
         parentData[arrayPropName] = cards;
-        ContentService.saveData(pageKey, parentData);
+        await ContentService.saveData(pageKey, parentData);
       });
     });
   });
 
   document.querySelectorAll(`.btn-del-${cardType}`).forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
-      if (confirm('Delete this card?')) {
+      if (!confirm('Delete this card?')) return;
+      btn.disabled = true;
+      try {
         cards.splice(idx, 1);
         parentData[arrayPropName] = cards;
-        ContentService.saveData(pageKey, parentData);
+        await ContentService.saveData(pageKey, parentData);
         rerender();
-        showToast('Card deleted.', '');
+        showToast('Card deleted.', 'info');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to delete card: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
       }
     });
   });
 
   document.querySelectorAll(`.btn-move-${cardType}`).forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       const dir = btn.getAttribute('data-dir');
       const targetIdx = dir === 'up' ? idx - 1 : idx + 1;
-      parentData[arrayPropName] = reorderArray(cards, idx, targetIdx);
-      ContentService.saveData(pageKey, parentData);
-      rerender();
-      showToast('Card order updated!', 'success');
+      btn.disabled = true;
+      try {
+        parentData[arrayPropName] = reorderArray(cards, idx, targetIdx);
+        await ContentService.saveData(pageKey, parentData);
+        rerender();
+        showToast('Card order updated!', 'success');
+      } catch (err) {
+        showToast(err.isConflict ? 'Conflict: modified elsewhere. Please refresh.' : 'Failed to move card: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
+  });
+}
+
+// ─── Enquiries Management Module ────────────────────────────────────────────
+
+async function loadEnquiriesTabContent() {
+  enquiriesLoading = true;
+  try {
+    const [statsRes, staffRes, enquiriesRes] = await Promise.all([
+      ApiService.getAdminEnquiryStats().catch(() => ({ total: 0, byStatus: {}, byRegion: {} })),
+      ApiService.getAdminStaff().catch(() => ({ staff: [] })),
+      ApiService.getAdminEnquiries(enquiriesFilter).catch(() => ({ items: [], pagination: { page: 1, limit: 25, total: 0, totalPages: 1 } })),
+    ]);
+
+    enquiriesStats = statsRes || { total: 0, byStatus: {}, byRegion: {} };
+    enquiriesStaff = staffRes.staff || [];
+    enquiriesData = enquiriesRes || { items: [], pagination: { page: 1, limit: 25, total: 0, totalPages: 1 } };
+  } catch (err) {
+    showToast(`Error loading enquiries: ${err.message}`, 'error');
+  } finally {
+    enquiriesLoading = false;
+  }
+}
+
+function renderEnquiriesTab() {
+  const { items = [], pagination = { page: 1, limit: 25, total: 0, totalPages: 1 } } = enquiriesData;
+  const stats = enquiriesStats || {};
+  const byStatus = stats.byStatus || {};
+
+  const totalCount = stats.total || 0;
+  const newCount = byStatus.NEW || 0;
+  const inProgressCount = (byStatus.ASSIGNED || 0) + (byStatus.IN_PROGRESS || 0);
+  const quotedCount = byStatus.QUOTED || 0;
+  const closedCount = (byStatus.CLOSED || 0) + (byStatus.ARCHIVED || 0);
+
+  const exportUrl = ApiService.getAdminEnquiriesExportUrl(enquiriesFilter);
+  const exportCommsUrl = ApiService.getAdminCommunicationsExportUrl(enquiriesFilter);
+
+  return `
+    <div class="a-tab-header">
+      <div>
+        <h2>Enquiries &amp; Technical RFQ Management</h2>
+        <p>Real-time customer enquiries, regional office routing, workflow states, and communication audit trails.</p>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <a href="${exportUrl}" download class="a-btn a-btn-outline a-btn-sm" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;">
+          <i class="fa-solid fa-file-csv"></i> Export Enquiries CSV
+        </a>
+        <a href="${exportCommsUrl}" download class="a-btn a-btn-outline a-btn-sm" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;">
+          <i class="fa-solid fa-file-lines"></i> Export Communications CSV
+        </a>
+        <button type="button" class="a-btn a-btn-primary a-btn-sm" id="btn-refresh-enquiries">
+          <i class="fa-solid fa-rotate"></i> Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- KPI Summary Row -->
+    <div class="a-kpi-row">
+      <div class="a-kpi-card ${!enquiriesFilter.workflowStatus ? 'active' : ''}" data-kpi-status="">
+        <h4>${totalCount}</h4>
+        <p>All Enquiries</p>
+      </div>
+      <div class="a-kpi-card ${enquiriesFilter.workflowStatus === 'NEW' ? 'active' : ''}" data-kpi-status="NEW">
+        <h4 style="color:#2563eb;">${newCount}</h4>
+        <p>New / Unreviewed</p>
+      </div>
+      <div class="a-kpi-card ${enquiriesFilter.workflowStatus === 'IN_PROGRESS' || enquiriesFilter.workflowStatus === 'ASSIGNED' ? 'active' : ''}" data-kpi-status="IN_PROGRESS">
+        <h4 style="color:#d97706;">${inProgressCount}</h4>
+        <p>Assigned / Active</p>
+      </div>
+      <div class="a-kpi-card ${enquiriesFilter.workflowStatus === 'QUOTED' ? 'active' : ''}" data-kpi-status="QUOTED">
+        <h4 style="color:#16a34a;">${quotedCount}</h4>
+        <p>Quoted</p>
+      </div>
+      <div class="a-kpi-card ${enquiriesFilter.workflowStatus === 'CLOSED' || enquiriesFilter.workflowStatus === 'ARCHIVED' ? 'active' : ''}" data-kpi-status="CLOSED">
+        <h4 style="color:#64748b;">${closedCount}</h4>
+        <p>Closed / Archived</p>
+      </div>
+    </div>
+
+    <!-- Search & Filter Controls -->
+    <div class="a-enquiries-filters">
+      <div style="flex:2;min-width:220px;position:relative;">
+        <input
+          type="text"
+          class="a-input"
+          id="enq-search-input"
+          placeholder="Search customer, company, email, or model..."
+          value="${escapeHtml(enquiriesFilter.search || '')}"
+          style="padding-left:32px;"
+        />
+        <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#94a3b8;font-size:0.85rem;"></i>
+      </div>
+
+      <div style="flex:1;min-width:150px;">
+        <select class="a-input" id="enq-region-select">
+          <option value="" ${!enquiriesFilter.region ? 'selected' : ''}>All Offices / Regions</option>
+          <option value="INDIA" ${enquiriesFilter.region === 'INDIA' ? 'selected' : ''}>India HQ (Bengaluru)</option>
+          <option value="SINGAPORE" ${enquiriesFilter.region === 'SINGAPORE' ? 'selected' : ''}>Singapore Liaison</option>
+          <option value="USA" ${enquiriesFilter.region === 'USA' ? 'selected' : ''}>USA Liaison</option>
+          <option value="UNCLASSIFIED" ${enquiriesFilter.region === 'UNCLASSIFIED' ? 'selected' : ''}>Historical (Unclassified)</option>
+        </select>
+      </div>
+
+      <div style="flex:1;min-width:150px;">
+        <select class="a-input" id="enq-status-select">
+          <option value="" ${!enquiriesFilter.workflowStatus ? 'selected' : ''}>All Statuses</option>
+          <option value="NEW" ${enquiriesFilter.workflowStatus === 'NEW' ? 'selected' : ''}>NEW</option>
+          <option value="ASSIGNED" ${enquiriesFilter.workflowStatus === 'ASSIGNED' ? 'selected' : ''}>ASSIGNED</option>
+          <option value="IN_PROGRESS" ${enquiriesFilter.workflowStatus === 'IN_PROGRESS' ? 'selected' : ''}>IN PROGRESS</option>
+          <option value="QUOTED" ${enquiriesFilter.workflowStatus === 'QUOTED' ? 'selected' : ''}>QUOTED</option>
+          <option value="CONTACTED" ${enquiriesFilter.workflowStatus === 'CONTACTED' ? 'selected' : ''}>CONTACTED</option>
+          <option value="CLOSED" ${enquiriesFilter.workflowStatus === 'CLOSED' ? 'selected' : ''}>CLOSED</option>
+          <option value="ARCHIVED" ${enquiriesFilter.workflowStatus === 'ARCHIVED' ? 'selected' : ''}>ARCHIVED</option>
+        </select>
+      </div>
+
+      <div style="flex:1;min-width:150px;">
+        <select class="a-input" id="enq-staff-select">
+          <option value="" ${!enquiriesFilter.assignedToId ? 'selected' : ''}>All Staff</option>
+          <option value="unassigned" ${enquiriesFilter.assignedToId === 'unassigned' ? 'selected' : ''}>Unassigned</option>
+          ${enquiriesStaff.map(s => `
+            <option value="${s.id}" ${enquiriesFilter.assignedToId === s.id ? 'selected' : ''}>${escapeHtml(s.email)}</option>
+          `).join('')}
+        </select>
+      </div>
+
+      ${(enquiriesFilter.search || enquiriesFilter.region || enquiriesFilter.workflowStatus || enquiriesFilter.assignedToId) ? `
+        <button type="button" class="a-btn a-btn-outline a-btn-sm" id="btn-clear-enq-filters" style="white-space:nowrap;">
+          <i class="fa-solid fa-xmark"></i> Clear Filters
+        </button>
+      ` : ''}
+    </div>
+
+    <!-- Enquiries Data Table -->
+    <div class="a-card" style="padding:0;overflow:hidden;">
+      <div style="overflow-x:auto;">
+        <table class="a-table" style="width:100%;border-collapse:collapse;margin:0;">
+          <thead>
+            <tr style="background:#f8fafc;border-bottom:1px solid var(--a-border);text-align:left;">
+              <th style="padding:10px 14px;font-size:0.75rem;color:#64748b;">REFERENCE / DATE</th>
+              <th style="padding:10px 14px;font-size:0.75rem;color:#64748b;">CUSTOMER &amp; COMPANY</th>
+              <th style="padding:10px 14px;font-size:0.75rem;color:#64748b;">CONTACT</th>
+              <th style="padding:10px 14px;font-size:0.75rem;color:#64748b;">OFFICE &amp; SUBJECT</th>
+              <th style="padding:10px 14px;font-size:0.75rem;color:#64748b;">STATUS</th>
+              <th style="padding:10px 14px;font-size:0.75rem;color:#64748b;">ASSIGNEE</th>
+              <th style="padding:10px 14px;font-size:0.75rem;color:#64748b;text-align:right;">ACTION</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.length === 0 ? `
+              <tr>
+                <td colspan="7" style="text-align:center;padding:48px 16px;color:#94a3b8;">
+                  <i class="fa-solid fa-inbox" style="font-size:2rem;margin-bottom:8px;opacity:0.5;display:block;"></i>
+                  ${enquiriesLoading ? 'Loading enquiries...' : 'No customer enquiries found matching the selected filters.'}
+                </td>
+              </tr>
+            ` : items.map(item => {
+              const refCode = (item.id.length > 8 ? item.id.slice(-8) : item.id).toUpperCase();
+              const dateStr = item.createdAt ? new Date(item.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+              const statusClass = (item.workflowStatus || 'NEW').toLowerCase();
+              const regionClass = (item.region || 'unclassified').toLowerCase();
+              const assigneeName = item.assignedTo?.email || '<span style="color:#94a3b8;font-style:italic;">Unassigned</span>';
+
+              return `
+                <tr style="border-bottom:1px solid #f1f5f9;">
+                  <td style="padding:10px 14px;font-size:0.82rem;">
+                    <strong style="color:#0f172a;font-family:monospace;">#IE-${escapeHtml(refCode)}</strong>
+                    <div style="font-size:0.72rem;color:#94a3b8;margin-top:2px;">${dateStr}</div>
+                  </td>
+                  <td style="padding:10px 14px;font-size:0.84rem;">
+                    <div style="font-weight:700;color:#0f172a;">${escapeHtml(item.fullname)}</div>
+                    <div style="font-size:0.76rem;color:#475569;">${escapeHtml(item.company)}</div>
+                  </td>
+                  <td style="padding:10px 14px;font-size:0.8rem;">
+                    <div><a href="mailto:${escapeHtml(item.email)}" style="color:#2563eb;text-decoration:none;">${escapeHtml(item.email)}</a></div>
+                    <div style="color:#64748b;font-size:0.74rem;">${escapeHtml(item.phone)}</div>
+                  </td>
+                  <td style="padding:10px 14px;">
+                    <span class="a-badge-region a-badge-${regionClass}">${escapeHtml(item.region || 'Unclassified')}</span>
+                    <div style="font-size:0.75rem;color:#64748b;margin-top:3px;text-transform:uppercase;">${escapeHtml(item.type || 'general')}</div>
+                  </td>
+                  <td style="padding:10px 14px;">
+                    <span class="a-badge-status a-badge-${statusClass}">${escapeHtml(item.workflowStatus || 'NEW')}</span>
+                  </td>
+                  <td style="padding:10px 14px;font-size:0.8rem;color:#334155;">
+                    ${assigneeName}
+                  </td>
+                  <td style="padding:10px 14px;text-align:right;">
+                    <button type="button" class="a-btn a-btn-outline a-btn-sm btn-view-enquiry" data-id="${item.id}" style="padding:4px 10px;font-size:0.78rem;">
+                      <i class="fa-solid fa-eye"></i> View &amp; Manage
+                    </button>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination bar -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:#f8fafc;border-top:1px solid var(--a-border);font-size:0.8rem;color:#64748b;flex-wrap:wrap;gap:10px;">
+        <div>
+          Showing <strong>${items.length ? (pagination.page - 1) * pagination.limit + 1 : 0}</strong> to <strong>${Math.min(pagination.page * pagination.limit, pagination.total)}</strong> of <strong>${pagination.total}</strong> enquiries
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <button
+            type="button"
+            class="a-btn a-btn-outline a-btn-sm"
+            id="btn-enq-prev"
+            ${pagination.page <= 1 ? 'disabled style="opacity:0.5;"' : ''}
+          >
+            <i class="fa-solid fa-chevron-left"></i> Previous
+          </button>
+          <span style="padding:0 8px;font-weight:600;">Page ${pagination.page} of ${pagination.totalPages || 1}</span>
+          <button
+            type="button"
+            class="a-btn a-btn-outline a-btn-sm"
+            id="btn-enq-next"
+            ${pagination.page >= pagination.totalPages ? 'disabled style="opacity:0.5;"' : ''}
+          >
+            Next <i class="fa-solid fa-chevron-right"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function bindEnquiriesTabEvents() {
+  const refreshBtn = document.getElementById('btn-refresh-enquiries');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', async () => {
+      refreshBtn.disabled = true;
+      refreshBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Refreshing...';
+      await loadEnquiriesTabContent();
+      rerender();
+      showToast('Enquiry data refreshed.', 'info');
+    });
+  }
+
+  // KPI card clicks
+  document.querySelectorAll('.a-kpi-card[data-kpi-status]').forEach(card => {
+    card.addEventListener('click', async () => {
+      enquiriesFilter.workflowStatus = card.getAttribute('data-kpi-status');
+      enquiriesFilter.page = 1;
+      await loadEnquiriesTabContent();
+      rerender();
+    });
+  });
+
+  // Search input with debounce
+  let searchTimeout = null;
+  const searchInput = document.getElementById('enq-search-input');
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(async () => {
+        enquiriesFilter.search = e.target.value.trim();
+        enquiriesFilter.page = 1;
+        await loadEnquiriesTabContent();
+        rerender();
+      }, 350);
+    });
+  }
+
+  // Region filter
+  const regionSelect = document.getElementById('enq-region-select');
+  if (regionSelect) {
+    regionSelect.addEventListener('change', async (e) => {
+      enquiriesFilter.region = e.target.value;
+      enquiriesFilter.page = 1;
+      await loadEnquiriesTabContent();
+      rerender();
+    });
+  }
+
+  // Status filter
+  const statusSelect = document.getElementById('enq-status-select');
+  if (statusSelect) {
+    statusSelect.addEventListener('change', async (e) => {
+      enquiriesFilter.workflowStatus = e.target.value;
+      enquiriesFilter.page = 1;
+      await loadEnquiriesTabContent();
+      rerender();
+    });
+  }
+
+  // Staff filter
+  const staffSelect = document.getElementById('enq-staff-select');
+  if (staffSelect) {
+    staffSelect.addEventListener('change', async (e) => {
+      enquiriesFilter.assignedToId = e.target.value;
+      enquiriesFilter.page = 1;
+      await loadEnquiriesTabContent();
+      rerender();
+    });
+  }
+
+  // Clear filters
+  const clearBtn = document.getElementById('btn-clear-enq-filters');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', async () => {
+      enquiriesFilter = { search: '', region: '', workflowStatus: '', assignedToId: '', page: 1, limit: 25 };
+      await loadEnquiriesTabContent();
+      rerender();
+    });
+  }
+
+  // Pagination buttons
+  document.getElementById('btn-enq-prev')?.addEventListener('click', async () => {
+    if (enquiriesFilter.page > 1) {
+      enquiriesFilter.page--;
+      await loadEnquiriesTabContent();
+      rerender();
+    }
+  });
+
+  document.getElementById('btn-enq-next')?.addEventListener('click', async () => {
+    if (enquiriesFilter.page < (enquiriesData?.pagination?.totalPages || 1)) {
+      enquiriesFilter.page++;
+      await loadEnquiriesTabContent();
+      rerender();
+    }
+  });
+
+  // View / Manage enquiry buttons
+  document.querySelectorAll('.btn-view-enquiry').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-id');
+      if (id) openEnquiryDetailModal(id);
+    });
+  });
+}
+
+/**
+ * Open detail and management modal with customer details, workflow status, assignment, and communication timeline.
+ */
+async function openEnquiryDetailModal(enquiryId) {
+  const container = document.getElementById('a-modal-container');
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="a-modal-backdrop" id="a-modal-backdrop">
+      <div class="a-modal" style="max-width:960px;width:95%;">
+        <div style="padding:40px;text-align:center;color:#64748b;">
+          <i class="fa-solid fa-spinner fa-spin" style="font-size:2rem;color:#2563eb;margin-bottom:12px;"></i>
+          <p>Loading full enquiry history and communications...</p>
+        </div>
+      </div>
+    </div>
+  `;
+
+  let enquiry = null;
+  try {
+    const res = await ApiService.getAdminEnquiryDetail(enquiryId);
+    enquiry = res?.enquiry || null;
+  } catch (err) {
+    container.innerHTML = '';
+    showToast(`Failed to load enquiry: ${err.message}`, 'error');
+    return;
+  }
+
+  if (!enquiry) {
+    container.innerHTML = '';
+    showToast('Enquiry not found.', 'error');
+    return;
+  }
+
+  const refCode = (enquiry.id.length > 8 ? enquiry.id.slice(-8) : enquiry.id).toUpperCase();
+  const dateStr = enquiry.createdAt ? new Date(enquiry.createdAt).toLocaleString() : '';
+  const comms = enquiry.communications || [];
+
+  const modalHtml = `
+    <div class="a-modal-backdrop" id="a-modal-backdrop">
+      <div class="a-modal" style="max-width:1000px;width:95%;max-height:92vh;display:flex;flex-direction:column;">
+        <div class="a-modal-header" style="padding:14px 20px;">
+          <div>
+            <h3 style="margin:0;font-size:1.15rem;display:flex;align-items:center;gap:8px;">
+              <span>Enquiry Ref: #IE-${escapeHtml(refCode)}</span>
+              <span class="a-badge-status a-badge-${(enquiry.workflowStatus || 'NEW').toLowerCase()}">${escapeHtml(enquiry.workflowStatus || 'NEW')}</span>
+            </h3>
+            <p style="margin:2px 0 0;font-size:0.75rem;color:#64748b;">Submitted ${dateStr} &bull; ${escapeHtml(enquiry.region || 'Unclassified Office')}</p>
+          </div>
+          <button type="button" class="a-modal-close" id="modal-close-enquiry">&times;</button>
+        </div>
+
+        <div class="a-modal-body" style="padding:18px 20px;overflow-y:auto;flex:1;">
+          <div style="display:grid;grid-template-columns:1fr 1.3fr;gap:20px;">
+
+            <!-- LEFT COLUMN: Customer Information Card -->
+            <div>
+              <div class="a-card" style="margin-bottom:16px;">
+                <h4 style="margin:0 0 12px;font-size:0.85rem;text-transform:uppercase;color:#1e3a5f;letter-spacing:0.5px;">Customer Profile</h4>
+                <table style="width:100%;font-size:0.82rem;border-collapse:collapse;">
+                  <tr><td style="padding:5px 0;color:#64748b;width:34%;">Name:</td><td style="padding:5px 0;font-weight:700;color:#0f172a;">${escapeHtml(enquiry.fullname)}</td></tr>
+                  <tr><td style="padding:5px 0;color:#64748b;">Company:</td><td style="padding:5px 0;color:#0f172a;">${escapeHtml(enquiry.company)}</td></tr>
+                  <tr><td style="padding:5px 0;color:#64748b;">Email:</td><td style="padding:5px 0;"><a href="mailto:${escapeHtml(enquiry.email)}" style="color:#2563eb;text-decoration:none;">${escapeHtml(enquiry.email)}</a></td></tr>
+                  <tr><td style="padding:5px 0;color:#64748b;">Phone:</td><td style="padding:5px 0;"><a href="tel:${escapeHtml(enquiry.phone)}" style="color:#2563eb;text-decoration:none;">${escapeHtml(enquiry.phone)}</a></td></tr>
+                  <tr><td style="padding:5px 0;color:#64748b;">Target Office:</td><td style="padding:5px 0;"><span class="a-badge-region a-badge-${(enquiry.region || 'unclassified').toLowerCase()}">${escapeHtml(enquiry.region || 'Unclassified')}</span></td></tr>
+                  <tr><td style="padding:5px 0;color:#64748b;">Subject:</td><td style="padding:5px 0;text-transform:uppercase;font-weight:600;">${escapeHtml(enquiry.type)}</td></tr>
+                  ${enquiry.model ? `<tr><td style="padding:5px 0;color:#64748b;">Model / Band:</td><td style="padding:5px 0;color:#0f172a;">${escapeHtml(enquiry.model)}</td></tr>` : ''}
+                  <tr><td style="padding:5px 0;color:#64748b;">Submitter IP:</td><td style="padding:5px 0;font-family:monospace;font-size:0.75rem;color:#64748b;">${escapeHtml(enquiry.ip || 'Not recorded')}</td></tr>
+                </table>
+              </div>
+
+              <div class="a-card">
+                <h4 style="margin:0 0 8px;font-size:0.85rem;text-transform:uppercase;color:#1e3a5f;letter-spacing:0.5px;">Customer Requirement</h4>
+                <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px;font-size:0.84rem;color:#334155;line-height:1.6;white-space:pre-wrap;max-height:260px;overflow-y:auto;">${escapeHtml(enquiry.message)}</div>
+              </div>
+            </div>
+
+            <!-- RIGHT COLUMN: Workflow Management & Communication Timeline -->
+            <div>
+              <!-- Quick Status & Assignee Controls -->
+              <div class="a-card" style="margin-bottom:16px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px;">
+                  <div>
+                    <label style="display:block;font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:4px;">WORKFLOW STATUS</label>
+                    <select class="a-input a-input-sm" id="modal-status-select">
+                      <option value="NEW" ${enquiry.workflowStatus === 'NEW' ? 'selected' : ''}>NEW</option>
+                      <option value="ASSIGNED" ${enquiry.workflowStatus === 'ASSIGNED' ? 'selected' : ''}>ASSIGNED</option>
+                      <option value="IN_PROGRESS" ${enquiry.workflowStatus === 'IN_PROGRESS' ? 'selected' : ''}>IN PROGRESS</option>
+                      <option value="QUOTED" ${enquiry.workflowStatus === 'QUOTED' ? 'selected' : ''}>QUOTED</option>
+                      <option value="CONTACTED" ${enquiry.workflowStatus === 'CONTACTED' ? 'selected' : ''}>CONTACTED</option>
+                      <option value="CLOSED" ${enquiry.workflowStatus === 'CLOSED' ? 'selected' : ''}>CLOSED</option>
+                      <option value="ARCHIVED" ${enquiry.workflowStatus === 'ARCHIVED' ? 'selected' : ''}>ARCHIVED</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:4px;">ASSIGN TO STAFF</label>
+                    <select class="a-input a-input-sm" id="modal-assign-select">
+                      <option value="" ${!enquiry.assignedToId ? 'selected' : ''}>Unassigned</option>
+                      ${enquiriesStaff.map(s => `
+                        <option value="${s.id}" ${enquiry.assignedToId === s.id ? 'selected' : ''}>${escapeHtml(s.email)}</option>
+                      `).join('')}
+                    </select>
+                  </div>
+                </div>
+                <div style="display:flex;justify-content:flex-end;">
+                  <button type="button" class="a-btn a-btn-primary a-btn-sm" id="btn-save-workflow-changes">
+                    <i class="fa-solid fa-check"></i> Apply Status &amp; Assignment
+                  </button>
+                </div>
+              </div>
+
+              <!-- Communication Logger Form -->
+              <div class="a-card" style="margin-bottom:16px;">
+                <h4 style="margin:0 0 8px;font-size:0.85rem;text-transform:uppercase;color:#1e3a5f;letter-spacing:0.5px;">Log Communication / Note</h4>
+                <div style="display:flex;gap:8px;margin-bottom:10px;">
+                  <button type="button" class="a-btn a-btn-sm a-btn-primary btn-comm-type active" data-type="INTERNAL_NOTE">
+                    <i class="fa-solid fa-note-sticky"></i> Internal Note
+                  </button>
+                  <button type="button" class="a-btn a-btn-sm a-btn-outline btn-comm-type" data-type="CUSTOMER_REPLY">
+                    <i class="fa-solid fa-reply"></i> Customer Reply
+                  </button>
+                  <button type="button" class="a-btn a-btn-sm a-btn-outline btn-comm-type" data-type="PHONE_LOG">
+                    <i class="fa-solid fa-phone"></i> Phone Call
+                  </button>
+                </div>
+                <div style="margin-bottom:8px;">
+                  <input type="text" class="a-input a-input-sm" id="comm-subject" placeholder="Subject or summary..." style="margin-bottom:6px;" />
+                  <textarea class="a-input a-input-sm" id="comm-body" rows="3" placeholder="Enter communication details or call notes..." required></textarea>
+                </div>
+                <div style="display:flex;justify-content:flex-end;">
+                  <button type="button" class="a-btn a-btn-primary a-btn-sm" id="btn-submit-comm">
+                    <i class="fa-solid fa-plus"></i> Save to Timeline
+                  </button>
+                </div>
+              </div>
+
+              <!-- Chronological Timeline -->
+              <div>
+                <h4 style="margin:0 0 10px;font-size:0.85rem;text-transform:uppercase;color:#1e3a5f;letter-spacing:0.5px;">
+                  Communication &amp; Audit Timeline (${comms.length + 1})
+                </h4>
+                <div class="a-timeline">
+
+                  <!-- Event 1: Initial Submission -->
+                  <div class="a-timeline-item">
+                    <div class="a-timeline-dot email"></div>
+                    <div class="a-timeline-card">
+                      <div class="a-timeline-head">
+                        <span><i class="fa-solid fa-paper-plane" style="color:#2563eb;"></i> Enquiry Submitted via Website</span>
+                        <span style="font-size:0.72rem;color:#94a3b8;">${dateStr}</span>
+                      </div>
+                      <div class="a-timeline-body">
+                        Customer submitted RFQ / technical requirement. Regional routing directed notification to ${escapeHtml(enquiry.region || 'central')} team.
+                      </div>
+                      <div class="a-timeline-meta">Delivery status: ${escapeHtml(enquiry.status || 'RECEIVED')}</div>
+                    </div>
+                  </div>
+
+                  <!-- Subsequent Events -->
+                  ${comms.map(c => {
+                    const cDate = c.createdAt ? new Date(c.createdAt).toLocaleString() : '';
+                    let dotClass = 'note';
+                    let icon = 'fa-solid fa-note-sticky';
+                    let label = 'Internal Note';
+
+                    if (c.type === 'STATUS_CHANGE') {
+                      dotClass = 'status';
+                      icon = 'fa-solid fa-arrows-rotate';
+                      label = 'Workflow Status Updated';
+                    } else if (c.type === 'PHONE_LOG') {
+                      dotClass = 'phone';
+                      icon = 'fa-solid fa-phone';
+                      label = 'Phone Call Log';
+                    } else if (c.type === 'CUSTOMER_REPLY') {
+                      dotClass = 'reply';
+                      icon = 'fa-solid fa-reply';
+                      label = 'Customer Reply Recorded';
+                    } else if (c.type === 'EMAIL_OUTBOUND') {
+                      dotClass = 'email';
+                      icon = 'fa-solid fa-envelope';
+                      label = 'Automated Email Dispatched';
+                    }
+
+                    const authorStr = c.author?.email ? `by ${c.author.email}` : (c.type === 'EMAIL_OUTBOUND' ? 'Automated System' : '');
+                    const meta = c.metadata && typeof c.metadata === 'object' ? c.metadata : null;
+                    const deliveryStatus = meta?.deliveryStatus;
+                    const deliveryBadge = deliveryStatus ? `
+                      <span class="a-badge-status ${deliveryStatus === 'SENT' ? 'a-badge-sent' : 'a-badge-failed'}" style="font-size:0.65rem;padding:1px 6px;margin-left:6px;">
+                        ${escapeHtml(deliveryStatus)}
+                      </span>
+                    ` : '';
+                    const recipientInfo = meta?.recipient ? `<span class="a-timeline-channel">To: ${escapeHtml(meta.recipient)}</span>` : '';
+                    const errorBox = meta?.error ? `
+                      <div class="a-timeline-error">
+                        <i class="fa-solid fa-triangle-exclamation"></i> <strong>Delivery Error:</strong> ${escapeHtml(meta.error)}
+                      </div>
+                    ` : '';
+
+                    return `
+                      <div class="a-timeline-item">
+                        <div class="a-timeline-dot ${dotClass}"></div>
+                        <div class="a-timeline-card">
+                          <div class="a-timeline-head">
+                            <span style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;">
+                              <i class="${icon}"></i> ${escapeHtml(c.subject || label)}
+                              ${deliveryBadge}
+                              ${recipientInfo}
+                            </span>
+                            <span style="font-size:0.72rem;color:#94a3b8;">${cDate}</span>
+                          </div>
+                          <div class="a-timeline-body">${escapeHtml(c.body)}</div>
+                          ${errorBox}
+                          ${authorStr ? `<div class="a-timeline-meta">${escapeHtml(authorStr)}</div>` : ''}
+                        </div>
+                      </div>
+                    `;
+                  }).join('')}
+
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <div class="a-modal-footer" style="padding:12px 20px;border-top:1px solid var(--a-border);">
+          <button type="button" class="a-btn a-btn-outline a-btn-sm" id="modal-close-enquiry-footer">Close</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  container.innerHTML = modalHtml;
+
+  const closeModal = () => { container.innerHTML = ''; };
+  document.getElementById('modal-close-enquiry')?.addEventListener('click', closeModal);
+  document.getElementById('modal-close-enquiry-footer')?.addEventListener('click', closeModal);
+  document.getElementById('a-modal-backdrop')?.addEventListener('click', (e) => {
+    if (e.target.id === 'a-modal-backdrop') closeModal();
+  });
+
+  // Communication type button selector
+  let activeCommType = 'INTERNAL_NOTE';
+  document.querySelectorAll('.btn-comm-type').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.btn-comm-type').forEach(b => {
+        b.classList.remove('active', 'a-btn-primary');
+        b.classList.add('a-btn-outline');
+      });
+      btn.classList.add('active', 'a-btn-primary');
+      btn.classList.remove('a-btn-outline');
+      activeCommType = btn.getAttribute('data-type');
+    });
+  });
+
+  // Submit new communication log
+  document.getElementById('btn-submit-comm')?.addEventListener('click', async () => {
+    const bodyInput = document.getElementById('comm-body');
+    const subjectInput = document.getElementById('comm-subject');
+    const body = bodyInput ? bodyInput.value.trim() : '';
+    const subject = subjectInput ? subjectInput.value.trim() : '';
+
+    if (!body) {
+      alert('Please enter communication details or call notes.');
+      if (bodyInput) bodyInput.focus();
+      return;
+    }
+
+    const btn = document.getElementById('btn-submit-comm');
+    if (btn) btn.disabled = true;
+
+    try {
+      await ApiService.logEnquiryCommunication(enquiry.id, {
+        type: activeCommType,
+        subject,
+        body,
+      });
+      showToast('Communication logged successfully!', 'success');
+      // Reload and re-open modal to refresh timeline
+      await loadEnquiriesTabContent();
+      openEnquiryDetailModal(enquiry.id);
+    } catch (err) {
+      showToast(`Failed to log communication: ${err.message}`, 'error');
+      if (btn) btn.disabled = false;
+    }
+  });
+
+  // Submit Status & Assignment update
+  document.getElementById('btn-save-workflow-changes')?.addEventListener('click', async () => {
+    const statusSelect = document.getElementById('modal-status-select');
+    const assignSelect = document.getElementById('modal-assign-select');
+    const newStatus = statusSelect ? statusSelect.value : null;
+    const newAssigneeId = assignSelect ? (assignSelect.value || null) : null;
+
+    const btn = document.getElementById('btn-save-workflow-changes');
+    if (btn) btn.disabled = true;
+
+    try {
+      let changed = false;
+      let currentExpectedUpdatedAt = enquiry.updatedAt;
+
+      // Update status if changed, passing currentExpectedUpdatedAt for optimistic concurrency
+      if (newStatus && newStatus !== enquiry.workflowStatus) {
+        const statusRes = await ApiService.updateEnquiryStatus(
+          enquiry.id,
+          newStatus,
+          null,
+          currentExpectedUpdatedAt
+        );
+        if (statusRes?.enquiry?.updatedAt) {
+          currentExpectedUpdatedAt = statusRes.enquiry.updatedAt;
+          enquiry.updatedAt = statusRes.enquiry.updatedAt;
+        }
+        changed = true;
+      }
+
+      // Update assignee if changed, passing the refreshed expectedUpdatedAt
+      if (newAssigneeId !== enquiry.assignedToId) {
+        const assignRes = await ApiService.assignEnquiry(
+          enquiry.id,
+          newAssigneeId,
+          null,
+          currentExpectedUpdatedAt
+        );
+        if (assignRes?.enquiry?.updatedAt) {
+          enquiry.updatedAt = assignRes.enquiry.updatedAt;
+        }
+        changed = true;
+      }
+
+      if (changed) {
+        showToast('Workflow updates saved successfully!', 'success');
+        await loadEnquiriesTabContent();
+        openEnquiryDetailModal(enquiry.id);
+      } else {
+        showToast('No changes detected.', 'info');
+        if (btn) btn.disabled = false;
+      }
+    } catch (err) {
+      if (
+        err.status === 409 ||
+        err.message?.includes('modified by another user') ||
+        err.message?.includes('CONCURRENT_MODIFICATION')
+      ) {
+        showToast('Conflict: This enquiry was modified by another user. Reloading latest details...', 'error');
+        await loadEnquiriesTabContent();
+        openEnquiryDetailModal(enquiry.id);
+      } else {
+        showToast(`Update failed: ${err.message}`, 'error');
+        if (btn) btn.disabled = false;
+      }
+    }
   });
 }

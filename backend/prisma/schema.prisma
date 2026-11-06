@@ -27,6 +27,30 @@ enum EnquiryStatus {
   EMAIL_FAILED
 }
 
+enum EnquiryRegion {
+  INDIA
+  SINGAPORE
+  USA
+}
+
+enum EnquiryWorkflowStatus {
+  NEW
+  ASSIGNED
+  IN_PROGRESS
+  QUOTED
+  CONTACTED
+  CLOSED
+  ARCHIVED
+}
+
+enum CommunicationType {
+  INTERNAL_NOTE
+  EMAIL_OUTBOUND
+  CUSTOMER_REPLY
+  PHONE_LOG
+  STATUS_CHANGE
+}
+
 enum AdminRole {
   ADMIN
   EDITOR
@@ -63,23 +87,52 @@ enum ImportDecisionStatus {
 }
 
 model Enquiry {
-  id         String        @id @default(cuid())
+  id              String                 @id @default(cuid())
   // "rfq" | "technical" | "bespoke" | "delivery" | "general"
-  type       String
-  fullname   String
-  company    String
-  email      String
-  phone      String
-  model      String?
-  message    String
-  status     EnquiryStatus @default(RECEIVED)
-  emailError String?
+  type            String
+  fullname        String
+  company         String
+  email           String
+  phone           String
+  model           String?
+  message         String
+  status          EnquiryStatus          @default(RECEIVED)
+  emailError      String?
+  // Regional office routing (nullable: legacy records remain NULL/unclassified)
+  region          EnquiryRegion?
+  // Sales & operational workflow (defaults to NEW for tracking)
+  workflowStatus  EnquiryWorkflowStatus  @default(NEW)
+  assignedToId    String?
+  assignedTo      AdminUser?             @relation("EnquiryAssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   // Stored for abuse investigation only; never exposed publicly
-  ip         String?
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
+  ip              String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  // Relational history (protected by onDelete: Restrict)
+  communications  EnquiryCommunication[]
 
   @@index([status, createdAt])
+  @@index([workflowStatus, region, createdAt])
+  @@index([assignedToId, workflowStatus])
+}
+
+model EnquiryCommunication {
+  id          String            @id @default(cuid())
+  enquiryId   String
+  type        CommunicationType
+  subject     String?
+  body        String
+  metadata    Json?
+  authorId    String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  enquiry     Enquiry           @relation(fields: [enquiryId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  author      AdminUser?        @relation("CommunicationAuthor", fields: [authorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([enquiryId, createdAt])
+  @@index([type, createdAt])
+  @@index([authorId, createdAt])
 }
 
 model CareerApplication {
@@ -245,6 +298,9 @@ model AdminUser {
   mediaUploads      MediaAsset[]
   auditEvents       AuditEvent[]
   importRuns        ImportRun[]
+  siteContents      SiteContent[]
+  assignedEnquiries Enquiry[]              @relation("EnquiryAssignedTo")
+  enquiryComms      EnquiryCommunication[] @relation("CommunicationAuthor")
 }
 
 model AdminSession {
@@ -314,4 +370,16 @@ model ImportItem {
   @@unique([importRunId, sourceKey])
   @@index([importRunId, decisionStatus])
   @@index([cmsEntityType, cmsEntityId])
+}
+
+model SiteContent {
+  id          String     @id @default(cuid())
+  pageKey     String     @unique
+  content     Json
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  updatedById String?
+  updatedBy   AdminUser? @relation(fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([pageKey])
 }

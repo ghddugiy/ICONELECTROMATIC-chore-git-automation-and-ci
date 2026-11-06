@@ -52,7 +52,7 @@ async function request(path, { method = 'GET', body, headers = {} } = {}) {
     throw new ApiError(payload?.message || `Catalog API request failed (${response.status}).`, response.status);
   }
 
-  return payload?.data;
+  return payload?.data !== undefined ? payload.data : payload;
 }
 
 export const ApiService = {
@@ -105,6 +105,10 @@ export const ApiService = {
     return request(path, { method: 'POST', body });
   },
 
+  put(path, body) {
+    return request(path, { method: 'PUT', body });
+  },
+
   patch(path, body) {
     return request(path, { method: 'PATCH', body });
   },
@@ -127,5 +131,67 @@ export const ApiService = {
 
   async getMedia(id) {
     return request(`/media/${encodeURIComponent(id)}`);
+  },
+
+  // ─── Admin Enquiry Management API ──────────────────────────────────────────
+  async getAdminEnquiries(params = {}) {
+    const qs = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') qs.set(k, v);
+    });
+    const query = qs.toString() ? `?${qs.toString()}` : '';
+    return request(`/admin/enquiries${query}`);
+  },
+
+  async getAdminEnquiryStats() {
+    return request('/admin/enquiries/stats');
+  },
+
+  async getAdminStaff() {
+    return request('/admin/enquiries/staff');
+  },
+
+  async getAdminEnquiryDetail(id) {
+    return request(`/admin/enquiries/${encodeURIComponent(id)}`);
+  },
+
+  async updateEnquiryStatus(id, workflowStatus, note, expectedUpdatedAt) {
+    return request(`/admin/enquiries/${encodeURIComponent(id)}/status`, {
+      method: 'PATCH',
+      body: { workflowStatus, note, expectedUpdatedAt },
+    });
+  },
+
+  async assignEnquiry(id, assignedToId, note, expectedUpdatedAt) {
+    return request(`/admin/enquiries/${encodeURIComponent(id)}/assign`, {
+      method: 'PATCH',
+      body: { assignedToId, note, expectedUpdatedAt },
+    });
+  },
+
+  async logEnquiryCommunication(id, { type, subject, body, metadata }) {
+    return request(`/admin/enquiries/${encodeURIComponent(id)}/communications`, {
+      method: 'POST',
+      body: { type, subject, body, metadata },
+    });
+  },
+
+  getAdminEnquiriesExportUrl(params = {}) {
+    const qs = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') qs.set(k, v);
+    });
+    const query = qs.toString() ? `?${qs.toString()}` : '';
+    return `${API_BASE_URL}/admin/enquiries/export${query}`;
+  },
+
+  getAdminCommunicationsExportUrl(params = {}) {
+    const qs = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') qs.set(k, v);
+    });
+    qs.set('type', 'communications');
+    const query = qs.toString() ? `?${qs.toString()}` : '';
+    return `${API_BASE_URL}/admin/enquiries/export${query}`;
   },
 };

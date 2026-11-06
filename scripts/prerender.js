@@ -12,7 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, '..');
 const DIST_DIR = path.resolve(ROOT_DIR, 'dist');
-const BASE_ORIGIN = 'https://iconelectromatic.com';
+const BASE_ORIGIN = process.env.VITE_SITE_ORIGIN || process.env.SITE_ORIGIN || 'https://iconelectromatic.com';
 const SITE_NAME = 'ICON ELECTROMATIC';
 
 function escapeHtml(str) {
@@ -312,4 +312,3 @@ run().catch((err) => {
   console.error('Prerender error:', err);
   process.exit(1);
 });
-
