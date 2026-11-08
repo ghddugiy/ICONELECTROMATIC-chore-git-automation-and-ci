@@ -1,11 +1,13 @@
-# â”€â”€â”€ Icon Electromatic CI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Icon Electromatic CI ─────────────────────────────────────────────────────
 # Runs on every push to main and every pull request targeting main.
 #
 # Jobs:
-#   1. frontend-build  â€“ validates the Vite + prerender production build
-#   2. backend-tests   â€“ runs the full backend test suite against an ephemeral
-#                        PostgreSQL 16 service container
-#   3. prisma-validate â€“ checks that the Prisma schema is syntactically valid
+#   1. frontend-build  – validates the Vite + prerender production build and
+#                        uploads the dist/ directory as an artifact for reuse.
+#   2. backend-tests   – depends on frontend-build; downloads the dist/ artifact,
+#                        seeds the ephemeral PostgreSQL database with the baseline
+#                        catalog, then runs the full backend test suite.
+#   3. prisma-validate – checks that the Prisma schema is syntactically valid.
 #
 # External services (Resend email, Cloudflare R2) use empty or dummy env vars
 # so no real emails are sent and no live storage is accessed.
@@ -15,7 +17,7 @@
 #   - R2 configuration validation (hardcodes production bucket name)
 #   - LIVE R2 INTEGRATION (uploads to a real bucket)
 #   - POST-TRANSFER DATA SAFETY GUARANTEE (asserts catalog row counts)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ──────────────────────────────────────────────────────────────────────────────
 
 name: CI
 
@@ -26,7 +28,7 @@ on:
     branches: [main]
 
 jobs:
-  # â”€â”€ Job 1: Frontend production build â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # ── Job 1: Frontend production build ────────────────────────────────────────
   frontend-build:
     name: Frontend Build
     runs-on: ubuntu-latest
@@ -47,10 +49,23 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-  # â”€â”€ Job 2: Backend test suite â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          # Includes prerendered product pages (dist/) and generated public/
+          # files (robots.txt, sitemap.xml) needed by the backend test suite.
+          path: |
+            dist/
+            public/robots.txt
+            public/sitemap.xml
+          retention-days: 1
+
+  # ── Job 2: Backend test suite ───────────────────────────────────────────────
   backend-tests:
     name: Backend Tests
     runs-on: ubuntu-latest
+    needs: [frontend-build]
 
     services:
       postgres:
@@ -70,11 +85,11 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/icon_ci_test?schema=public
       NODE_ENV: test
-      # Email â€” empty strings prevent any real sends
+      # Email — empty strings prevent any real sends
       RESEND_API_KEY: ""
       RESEND_FROM_EMAIL: ""
       CONTACT_EMAIL: ""
-      # R2 â€” dummy values so getR2Config() does not throw on missing vars.
+      # R2 — dummy values so getR2Config() does not throw on missing vars.
       # The three tests that validate real R2 behaviour are skipped via CI flag.
       R2_ACCOUNT_ID: ci-dummy
       R2_ACCESS_KEY_ID: ci-dummy
@@ -89,6 +104,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Download frontend dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          # Place the artifact contents at the repo root so that:
+          #   dist/   → <repo-root>/dist/   (resolved by productSeo.test.js as ../dist/)
+          #   public/ → <repo-root>/public/ (resolved by productSeo.test.js as ../public/)
+          path: .
 
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
@@ -106,10 +130,13 @@ jobs:
       - name: Run database migrations
         run: npx prisma migrate deploy
 
+      - name: Seed CI catalog data
+        run: node scripts/seed-ci-catalog.js
+
       - name: Run backend tests
         run: node --test test/*.test.js
 
-  # â”€â”€ Job 3: Prisma schema validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # ── Job 3: Prisma schema validation ─────────────────────────────────────────
   prisma-validate:
     name: Prisma Validate
     runs-on: ubuntu-latest
@@ -133,4 +160,8 @@ jobs:
         run: npm ci
 
       - name: Validate Prisma schema
+        # DATABASE_URL must be present for the Prisma CLI to load its config,
+        # even though prisma validate performs no database connection.
         run: npx prisma validate
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci_validate_placeholder
