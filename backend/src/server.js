@@ -223,6 +223,77 @@ export function createApp({
   return app;
 }
 
+// ── Graceful shutdown ──────────────────────────────────────────────────────────
+
+/**
+ * Maximum milliseconds to wait for in-flight HTTP requests and Prisma
+ * disconnection to complete before forcing the process to exit.
+ * Exported so tests can reference the production default.
+ */
+export const SHUTDOWN_TIMEOUT_MS = 10_000;
+
+/**
+ * Returns a shutdown function that stops the HTTP server gracefully, then
+ * disconnects Prisma. Designed to be called from SIGTERM / SIGINT handlers.
+ *
+ * @param {object} opts
+ * @param {import('http').Server} opts.serverInstance - The running HTTP server.
+ * @param {object}               opts.prismaClient   - Prisma client with $disconnect().
+ * @param {number}               opts.timeoutMs      - Force-exit deadline in ms (default 10 s).
+ * @param {function}             opts.onExit         - Replacement for process.exit (injectable for tests).
+ */
+export function createShutdownHandler({
+  serverInstance,
+  prismaClient,
+  timeoutMs = SHUTDOWN_TIMEOUT_MS,
+  onExit = (code) => process.exit(code),
+} = {}) {
+  let isShuttingDown = false;
+
+  return async function shutdown(signal) {
+    // Guard: if another signal arrives while already shutting down, do nothing.
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+
+    console.info(`[shutdown] Received ${signal}. Starting graceful shutdown…`);
+
+    // Safety net: force-exit after timeoutMs so the process cannot hang forever.
+    // timer.unref() ensures the timer itself does not keep the event loop alive
+    // if everything else has already finished.
+    const timer = setTimeout(() => {
+      console.error("[shutdown] Shutdown timeout exceeded. Forcing process exit.");
+      onExit(1);
+    }, timeoutMs);
+    timer.unref();
+
+    // Drop idle keep-alive connections immediately so the server drains faster.
+    // closeIdleConnections() is available in Node.js ≥ 18.2; guard for safety.
+    if (typeof serverInstance.closeIdleConnections === "function") {
+      serverInstance.closeIdleConnections();
+    }
+
+    // Stop accepting new connections; wait for in-flight requests to finish.
+    serverInstance.close(async () => {
+      console.info("[shutdown] HTTP server closed.");
+
+      // Disconnect Prisma only after the HTTP server has fully drained.
+      try {
+        await prismaClient.$disconnect();
+        console.info("[shutdown] Prisma disconnected. Shutdown complete.");
+        clearTimeout(timer);
+        onExit(0);
+      } catch (err) {
+        // Database cleanup failed — report failure so the orchestrator can restart.
+        console.error("[shutdown] Prisma disconnect error:", err.message);
+        clearTimeout(timer);
+        onExit(1);
+      }
+    });
+  };
+}
+
+// ── Boot block (runs only when this file is started directly) ─────────────────
+
 const app = createApp();
 let server = null;
 
@@ -255,6 +326,14 @@ if (isDirectRun) {
     );
     process.exitCode = 1;
   });
+
+  // Register signal handlers only in direct-run mode, never during tests.
+  const shutdown = createShutdownHandler({
+    serverInstance: server,
+    prismaClient: prisma,
+  });
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT",  () => shutdown("SIGINT"));
 }
 
 export default app;

@@ -39,7 +39,8 @@ const VALID_WEBP_HEADER = Buffer.from([
   0x56, 0x50, 0x38, 0x20,
 ]);
 
-test("R2 configuration validates required environment variables without leaking secrets", () => {
+// Skip in CI: this test hardcodes the production bucket name and requires real R2 credentials.
+test("R2 configuration validates required environment variables without leaking secrets", { skip: process.env.CI === "true" }, () => {
   const config = getR2Config();
   assert.ok(config.accountId, "accountId must be defined");
   assert.ok(config.accessKeyId, "accessKeyId must be defined");
@@ -478,7 +479,8 @@ test("POST /api/media/upload executes rollback cleanup if database insert fails 
   }
 });
 
-test("LIVE R2 INTEGRATION: Uploads test 1x1 image, verifies presence, and deletes from icon-electromatic-media bucket", async () => {
+// Skip in CI: requires a live Cloudflare R2 bucket with valid credentials.
+test("LIVE R2 INTEGRATION: Uploads test 1x1 image, verifies presence, and deletes from icon-electromatic-media bucket", { skip: process.env.CI === "true" }, async () => {
   const testKey = `test-health/${crypto.randomUUID()}.png`;
   const sha256 = computeSha256(VALID_1X1_PNG);
 
@@ -502,7 +504,8 @@ test("LIVE R2 INTEGRATION: Uploads test 1x1 image, verifies presence, and delete
   }
 });
 
-test("POST-TRANSFER DATA SAFETY GUARANTEE: PostgreSQL catalog tables contain the expected baseline catalog", async () => {
+// Skip in CI: the ephemeral CI database has no seeded catalog data.
+test("POST-TRANSFER DATA SAFETY GUARANTEE: PostgreSQL catalog tables contain the expected baseline catalog", { skip: process.env.CI === "true" }, async () => {
   // The baseline catalog transfer was applied via the Admin CMS.
   // These counts verify that the media upload tests did not corrupt or modify catalog records.
   const [oemCount, catCount, prodCount] = await Promise.all([

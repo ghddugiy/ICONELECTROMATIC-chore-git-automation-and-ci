@@ -1,0 +1,136 @@
+# â”€â”€â”€ Icon Electromatic CI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Runs on every push to main and every pull request targeting main.
+#
+# Jobs:
+#   1. frontend-build  â€“ validates the Vite + prerender production build
+#   2. backend-tests   â€“ runs the full backend test suite against an ephemeral
+#                        PostgreSQL 16 service container
+#   3. prisma-validate â€“ checks that the Prisma schema is syntactically valid
+#
+# External services (Resend email, Cloudflare R2) use empty or dummy env vars
+# so no real emails are sent and no live storage is accessed.
+#
+# Three tests in mediaR2.test.js are skipped in CI (via process.env.CI) because
+# they require live R2 credentials or production-seeded catalog data:
+#   - R2 configuration validation (hardcodes production bucket name)
+#   - LIVE R2 INTEGRATION (uploads to a real bucket)
+#   - POST-TRANSFER DATA SAFETY GUARANTEE (asserts catalog row counts)
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # â”€â”€ Job 1: Frontend production build â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  frontend-build:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+  # â”€â”€ Job 2: Backend test suite â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  backend-tests:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: icon_ci_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/icon_ci_test?schema=public
+      NODE_ENV: test
+      # Email â€” empty strings prevent any real sends
+      RESEND_API_KEY: ""
+      RESEND_FROM_EMAIL: ""
+      CONTACT_EMAIL: ""
+      # R2 â€” dummy values so getR2Config() does not throw on missing vars.
+      # The three tests that validate real R2 behaviour are skipped via CI flag.
+      R2_ACCOUNT_ID: ci-dummy
+      R2_ACCESS_KEY_ID: ci-dummy
+      R2_SECRET_ACCESS_KEY: ci-dummy
+      R2_BUCKET_NAME: ci-dummy
+      R2_ENDPOINT: https://ci-dummy.r2.cloudflarestorage.com
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run database migrations
+        run: npx prisma migrate deploy
+
+      - name: Run backend tests
+        run: node --test test/*.test.js
+
+  # â”€â”€ Job 3: Prisma schema validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  prisma-validate:
+    name: Prisma Validate
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npx prisma validate

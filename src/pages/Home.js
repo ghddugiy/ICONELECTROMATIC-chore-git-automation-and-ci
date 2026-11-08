@@ -307,7 +307,7 @@ export function renderHomePage() {
                 </div>
                 <div class="relay-field">
                   <label for="h-phone">Contact Number</label>
-                  <input type="tel" id="h-phone" placeholder="+91 98765 43210" />
+                  <input type="tel" id="h-phone" placeholder="+91 98765 43210" required />
                 </div>
               </div>
 
@@ -413,26 +413,91 @@ export function initHomePage() {
 
   // Contact form submission
   const form = document.getElementById('home-contact-form');
-  if (form) {
-    form.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const name = document.getElementById('h-name').value;
-      const refId = 'ICON-' + Math.floor(100000 + Math.random() * 900000);
+  const submitBtn = form?.querySelector('button[type="submit"]');
+  const formWrap = form?.closest('.contact-relay-form');
 
-      form.innerHTML = `
-        <div style="text-align:center;padding:var(--space-8) var(--space-4);">
-          <div style="width:60px;height:60px;border-radius:50%;background:rgba(37,99,235,0.15);color:var(--logo-blue-light);display:flex;align-items:center;justify-content:center;font-size:1.8rem;margin:0 auto var(--space-4);">
-            <i class="fa-solid fa-check"></i>
-          </div>
-          <h3 style="font-size:1.4rem;font-weight:800;color:var(--text-white);margin-bottom:8px;">Thank You, ${name}!</h3>
-          <p style="color:var(--text-gray-400);font-size:0.95rem;margin-bottom:var(--space-4);">
-            Your message has been logged. A specialized RF application engineer will review your enquiry and contact you within 24 hours.
-          </p>
-          <div style="display:inline-block;padding:8px 16px;background:rgba(255,255,255,0.05);border:1px solid var(--border-card);border-radius:var(--radius-md);font-family:var(--font-display);font-size:0.85rem;color:var(--text-white);">
-            Enquiry Tracking Ref: <strong style="color:var(--logo-red-light);">${refId}</strong>
-          </div>
-        </div>
-      `;
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      // Prevent duplicate submissions while a request is in flight
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Sending...';
+      }
+
+      // Collect fields; website is the honeypot and must stay empty
+      const rawName = (document.getElementById('h-name')?.value    || '').trim();
+      const body = {
+        fullname: rawName,
+        company:  (document.getElementById('h-company')?.value || '').trim(),
+        email:    (document.getElementById('h-email')?.value   || '').trim(),
+        phone:    (document.getElementById('h-phone')?.value   || '').trim(),
+        subject:  (document.getElementById('h-subject')?.value || 'rfq').trim(),
+        message:  (document.getElementById('h-message')?.value || '').trim(),
+        // honeypot — must stay empty; real users never fill this in
+        website:  '',
+      };
+
+      // Escape the name for safe insertion into innerHTML
+      const safeName = rawName
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+      try {
+        const apiBase = (window.__ICON_API_BASE__ || '/api').replace(/\/+$/, '');
+        const res = await fetch(`${apiBase}/enquiries/contact`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok && data.success) {
+          // Backend returns { success: true, id: <uuid string> }
+          // Display the raw id as the submission token; do not reformat it here.
+          const refToken = data.id || '—';
+          if (formWrap) {
+            formWrap.innerHTML = `
+              <div style="text-align:center;padding:var(--space-8) var(--space-4);">
+                <div style="width:60px;height:60px;border-radius:50%;background:rgba(37,99,235,0.15);color:var(--logo-blue-light);display:flex;align-items:center;justify-content:center;font-size:1.8rem;margin:0 auto var(--space-4);">
+                  <i class="fa-solid fa-check"></i>
+                </div>
+                <h3 style="font-size:1.4rem;font-weight:800;color:var(--text-white);margin-bottom:8px;">Thank You, ${safeName}!</h3>
+                <p style="color:var(--text-gray-400);font-size:0.95rem;margin-bottom:var(--space-4);">
+                  Your enquiry has been received by ICON Electromatic Technical Dispatch. We will respond within 24 hours.
+                </p>
+                <div style="display:inline-block;padding:8px 16px;background:rgba(255,255,255,0.05);border:1px solid var(--border-card);border-radius:var(--radius-md);font-family:var(--font-display);font-size:0.85rem;color:var(--text-white);">
+                  Submission ID: <strong style="color:var(--logo-red-light);">${refToken}</strong>
+                </div>
+              </div>
+            `;
+          }
+        } else {
+          // Show the server's validation or dispatch error; re-enable button
+          const msg = data.message || 'Could not send your enquiry. Please try again or email us directly.';
+          const errEl = document.createElement('p');
+          errEl.style.cssText = 'color:var(--logo-red-light);font-size:0.9rem;margin-top:var(--space-2);text-align:center;';
+          errEl.textContent = msg;
+          form.insertAdjacentElement('beforebegin', errEl);
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = 'Transmit Enquiry <i class="fa-solid fa-paper-plane" style="margin-left:8px;"></i>';
+          }
+        }
+      } catch (_err) {
+        // Network / parse failure
+        const errEl = document.createElement('p');
+        errEl.style.cssText = 'color:var(--logo-red-light);font-size:0.9rem;margin-top:var(--space-2);text-align:center;';
+        errEl.textContent = 'Could not reach the server. Please check your connection or email us directly at enquiries@iconelectromatic.com.';
+        form.insertAdjacentElement('beforebegin', errEl);
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = 'Transmit Enquiry <i class="fa-solid fa-paper-plane" style="margin-left:8px;"></i>';
+        }
+      }
     });
   }
 }
