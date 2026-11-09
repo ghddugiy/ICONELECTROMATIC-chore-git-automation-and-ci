@@ -9,7 +9,7 @@
  *   - 10 submissions per IP per 30-minute window
  */
 
-import { createAttemptLimiter } from "./loginRateLimit.js";
+import { createAttemptLimiter, resolveClientIp } from "./loginRateLimit.js";
 
 const WINDOW_MS = 30 * 60 * 1000; // 30 minutes
 const MAX_ATTEMPTS = 10;
@@ -18,7 +18,7 @@ export function createEnquiryRateLimit({ windowMs = WINDOW_MS, maxAttempts = MAX
   const limiter = createAttemptLimiter({ windowMs, maxAttempts, now });
 
   return function enquiryRateLimit(req, res, next) {
-    const clientKey = req.socket?.remoteAddress || "unknown";
+    const clientKey = resolveClientIp(req);
     const result = limiter.consume(clientKey);
 
     if (!result.allowed) {

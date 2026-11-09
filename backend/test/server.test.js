@@ -16,7 +16,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { createShutdownHandler, SHUTDOWN_TIMEOUT_MS } from "../src/server.js";
+import { EventEmitter } from "node:events";
+import {
+  createProcessErrorHandlers,
+  createShutdownHandler,
+  SHUTDOWN_TIMEOUT_MS,
+} from "../src/server.js";
 
 // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -231,4 +236,105 @@ test("SHUTDOWN_TIMEOUT_MS â€” exported constant is a positive integer (prod
     Number.isInteger(SHUTDOWN_TIMEOUT_MS) && SHUTDOWN_TIMEOUT_MS > 0,
     `SHUTDOWN_TIMEOUT_MS must be a positive integer, got: ${SHUTDOWN_TIMEOUT_MS}`
   );
+});
+
+test("createShutdownHandler exits nonzero after gracefully handling fatal errors", async () => {
+  const server = await startTestServer();
+  let exitCode = null;
+  const shutdown = createShutdownHandler({
+    serverInstance: server,
+    prismaClient: { $disconnect: async () => {} },
+    onExit: (code) => {
+      exitCode = code;
+    },
+  });
+
+  shutdown("uncaughtException", 1);
+  await waitFor(() => exitCode !== null);
+
+  assert.equal(exitCode, 1);
+});
+
+test("createShutdownHandler preserves fatal exit code when it arrives during signal shutdown", async () => {
+  let closeCallback;
+  let exitCode = null;
+  const server = {
+    close: (callback) => {
+      closeCallback = callback;
+    },
+  };
+  const shutdown = createShutdownHandler({
+    serverInstance: server,
+    prismaClient: { $disconnect: async () => {} },
+    onExit: (code) => {
+      exitCode = code;
+    },
+  });
+
+  shutdown("SIGTERM");
+  await shutdown("uncaughtException", 1);
+  closeCallback();
+  await waitFor(() => exitCode !== null);
+
+  assert.equal(exitCode, 1);
+});
+
+test("createProcessErrorHandlers logs redacted errors and initiates fatal shutdown", () => {
+  const processObject = new EventEmitter();
+  const calls = [];
+  const logs = [];
+  const env = {
+    DATABASE_URL: "postgresql://db-user:db-password@db.example/catalog",
+    RESEND_API_KEY: "mail-secret",
+  };
+  const removeHandlers = createProcessErrorHandlers({
+    processObject,
+    shutdown: (...args) => calls.push(args),
+    errorLogger: (message) => logs.push(message),
+    env,
+  });
+
+  processObject.emit(
+    "unhandledRejection",
+    new Error(`${env.DATABASE_URL} rejected with ${env.RESEND_API_KEY}`)
+  );
+  processObject.emit(
+    "uncaughtException",
+    new Error("Connection failed: postgres://user:password@database.example")
+  );
+
+  assert.deepEqual(calls, [
+    ["unhandledRejection", 1],
+    ["uncaughtException", 1],
+  ]);
+  assert.equal(logs.length, 2);
+  assert.ok(logs[0].includes("Error:"));
+  assert.ok(logs.every((message) => !message.includes("db-password")));
+  assert.ok(logs.every((message) => !message.includes("mail-secret")));
+  assert.ok(logs.every((message) => !message.includes("user:password")));
+
+  removeHandlers();
+  assert.equal(processObject.listenerCount("unhandledRejection"), 0);
+  assert.equal(processObject.listenerCount("uncaughtException"), 0);
+});
+
+test("createProcessErrorHandlers exits nonzero when fatal shutdown fails", async () => {
+  const processObject = new EventEmitter();
+  const logs = [];
+  const exitCodes = [];
+  processObject.exit = (code) => exitCodes.push(code);
+  const removeHandlers = createProcessErrorHandlers({
+    processObject,
+    shutdown: () => {
+      throw new Error("shutdown failed");
+    },
+    errorLogger: (message) => logs.push(message),
+  });
+
+  processObject.emit("uncaughtException", new Error("fatal error"));
+  await waitFor(() => exitCodes.length > 0);
+
+  assert.deepEqual(exitCodes, [1]);
+  assert.ok(logs.some((message) => message.includes("shutdown failed")));
+  removeHandlers();
 });

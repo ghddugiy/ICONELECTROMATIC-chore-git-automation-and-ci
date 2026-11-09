@@ -81,6 +81,28 @@ test("login attempt limiter blocks at the threshold and resets after window", ()
   assert.equal(limiter.consume("client-a").allowed, true);
 });
 
+test("login attempt limiter prunes expired clients and remains bounded", () => {
+  let currentTime = 1000;
+  const limiter = createAttemptLimiter({
+    maxAttempts: 2,
+    windowMs: 1000,
+    maxClients: 2,
+    now: () => currentTime,
+  });
+
+  assert.equal(limiter.consume("client-a").allowed, true);
+  assert.equal(limiter.consume("client-b").allowed, true);
+
+  currentTime += 1000;
+  for (let attempt = 0; attempt < 253; attempt += 1) {
+    assert.equal(limiter.consume(`overflow-${attempt}`).allowed, false);
+  }
+
+  assert.equal(limiter.consume("client-c").allowed, true);
+  assert.equal(limiter.consume("client-d").allowed, true);
+  assert.equal(limiter.consume("client-e").allowed, false);
+});
+
 test("admin middleware rejects missing sessions and enforces CSRF", async () => {
   const sessionToken = createOpaqueToken();
   const csrfToken = createOpaqueToken();

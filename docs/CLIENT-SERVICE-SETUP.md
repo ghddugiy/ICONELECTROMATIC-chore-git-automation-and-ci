@@ -6,7 +6,10 @@ This document explains how to create and configure the three external cloud serv
 2. **Cloudflare R2 Storage** (Persistent image and media storage)
 3. **Resend Email Service** (Contact enquiries and career application notifications)
 
-This is a service setup guide, not a hosting or deployment guide. Once you have created these services, provide the resulting credentials securely to your technical deployment team.
+This is a service setup guide, not the end-to-end deployment runbook. Once you
+have created the services, place credentials in the client-controlled secret
+store and grant access only to an authorized deployment operator. Do not send
+secrets in email or commit them to the repository.
 
 ---
 
@@ -35,9 +38,10 @@ The website uses PostgreSQL to store catalog data, enquiries, and CMS content.
    * Securely provide this connection string as the following variable:
      * `DATABASE_URL`
 
-### What the Technical Team Will Do With This Service:
-* **Apply Database Schema:** The technical team will use the `DATABASE_URL` to apply the existing Prisma database migrations (`npm run migrate`), which create all required tables and indexes automatically.
-* **Seed Product Catalog:** Once the database tables are ready and an administrator account is provisioned, the initial catalog (15 OEMs, 88 categories, and 169 products) will be imported through the website's built-in Admin CMS catalog transfer feature.
+### Deployment notes
+* The client selects a managed PostgreSQL provider and region, creates a dedicated application user with privileges required by Prisma migrations and runtime, and securely configures `DATABASE_URL`.
+* The client deploys the complete source checkout, applies checked-in migrations with `cd backend` then `npm run migrate`, and chooses either the Admin CMS catalogue transfer or the separately documented guarded baseline seed. Never use a migration reset command against production.
+* Use the provider's recommended TLS settings and verify the database backup/restore procedure before launch. The local Docker PostgreSQL setup is for development/testing only.
 
 ---
 
@@ -57,7 +61,7 @@ Cloudflare R2 provides S3-compatible cloud object storage for product images and
    * Click **Create bucket**.
    * Enter a bucket name (for example, `icon-electromatic-media`).
    * Select your preferred storage region.
-   * **Keep the bucket access Private by default.** The application connects to R2 securely using S3 API credentials and delivers images safely.
+   * **Keep the bucket access Private by default.** Uploads are mediated by the authenticated backend; R2 credentials remain server-side.
 
 4. **Generate R2 API Credentials:**
    * On the main R2 page, click **Manage R2 API Tokens** on the right side.
@@ -75,10 +79,9 @@ Cloudflare R2 provides S3-compatible cloud object storage for product images and
      * **Bucket Name:** The name you chose in Step 3.
      * **S3 Endpoint:** Formatted as `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
 
-6. **Optional Public Custom Domain (CDN Delivery):**
-   * By default, the backend streams images directly from the private bucket.
-   * If you wish to serve images directly through Cloudflare's CDN for higher performance, navigate to your bucket's **Settings** > **Public Access** > **Custom Domains**, and connect a custom subdomain (for example, `media.iconelectromatic.com`).
-   * This step is optional. If configured, provide the URL as `R2_PUBLIC_DOMAIN`.
+6. **Optional Public Custom Domain:**
+   * The default delivery path uses `GET /api/media/file/:id`; the backend streams from the private bucket or falls back to a short-lived signed URL.
+   * Only configure a public custom domain if the client explicitly wants public object delivery. The route redirects to that host when `R2_PUBLIC_DOMAIN` is set; ensure the domain serves uploaded object keys and understand that this changes the private-bucket delivery model.
 
 ### Environment Variables to Provide:
 * `R2_ACCOUNT_ID`
@@ -102,21 +105,18 @@ Resend sends customer quotation requests (RFQs), contact enquiries, and career a
 2. **Add Your Corporate Domain:**
    * In the Resend dashboard, navigate to **Domains** > **Add Domain**.
    * Enter your corporate domain (for example, `iconelectromatic.com`).
-   * Select your preferred sending region.
+   * Select the sending region appropriate for the client's needs and account configuration.
 
 3. **Configure DNS Records:**
-   * Resend will provide three DNS records:
-     * **SPF** (TXT record to authorize Resend as a sender)
-     * **DKIM** (TXT / CNAME records to cryptographically sign your emails)
-     * **MX** / DMARC verification records
+   * Follow the exact record names, types, and values shown for the domain in the client's own Resend account and selected region. Do not assume a fixed number or type of records.
+   * Coordinate SPF and DMARC with the existing mail/DNS administrator. Avoid duplicate SPF records and do not replace inbound MX or other mail-security records unless the responsible administrator has reviewed the change.
 
 4. **Add Records to Your DNS Provider:**
    * Log in to the DNS management portal for your domain (such as Cloudflare DNS, GoDaddy, Namecheap, or AWS Route 53).
    * Add each record exactly as specified in the Resend dashboard.
 
 5. **Complete Domain Verification:**
-   * Return to the Resend dashboard and click **Verify Domain**.
-   * Confirm that the domain status shows **Verified**.
+   * Return to the Resend dashboard and confirm that the domain status shows **Verified**.
    * **Important:** The email service cannot be considered ready until the sending domain is verified. Unverified domains will fail to send emails in production.
 
 6. **Generate an API Key:**
@@ -127,7 +127,7 @@ Resend sends customer quotation requests (RFQs), contact enquiries, and career a
    * Click **Add** and copy the generated key (starts with `re_`).
 
 7. **Determine Email Addresses & Regional Mailbox Requirements:**
-   * **Sender Address (`RESEND_FROM_EMAIL`):** Must use your verified corporate domain (for example, `notifications@iconelectromatic.com` or `sales@iconelectromatic.com`). Customer acknowledgement emails and internal notifications are dispatched from this address.
+   * **Sender Address (`RESEND_FROM_EMAIL`):** Must be allowed by the verified domain and account configuration. This is the application's primary sender variable; `ENQUIRY_FROM` is a legacy fallback only.
    * **Primary Fallback Recipient (`CONTACT_EMAIL`):** The company inbox where career applications and general enquiries with unselected regions arrive (for example, `sales@iconelectromatic.com`).
    * **Regional Sales Mailboxes (Corporate Mail Server Setup):**
      The application automatically routes enquiries based on customer region. The client must ensure these mailboxes or email aliases exist and can receive external mail on the corporate mail system:
@@ -148,7 +148,7 @@ To avoid confusion during handover, note what the codebase already handles versu
   * Chronological communication audit logging and dual CSV export generation.
 * **Client Responsibilities (External Infrastructure):**
   * Provisioning the PostgreSQL database and providing `DATABASE_URL`.
-  * Creating the Cloudflare R2 bucket and providing API credentials.
+  * Creating a bucket-scoped Cloudflare R2 credential and configuring it only in the backend secret store.
   * Verifying the `iconelectromatic.com` sending domain in Resend and providing `RESEND_API_KEY`.
   * Ensuring `salesiepl@...`, `IESing@...`, `salesiellc@...`, and `CONTACT_EMAIL` exist on your corporate mail server.
 
@@ -166,15 +166,15 @@ Once all three services are created, provide the following configuration values 
 | Service | Variable Name | Description | Example (Placeholder) |
 |---|---|---|---|
 | **PostgreSQL** | `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:password@host:5432/dbname?schema=public` |
-| **Cloudflare R2** | `R2_ACCOUNT_ID` | Cloudflare account identifier | `a1b2c3d4e5f67890abcdef1234567890` |
-| **Cloudflare R2** | `R2_ACCESS_KEY_ID` | S3 API token access key | `0123456789abcdef0123456789abcdef` |
-| **Cloudflare R2** | `R2_SECRET_ACCESS_KEY` | S3 API token secret key | `fedcba9876543210fedcba9876543210fedcba98...` |
-| **Cloudflare R2** | `R2_BUCKET_NAME` | Private bucket name | `icon-electromatic-media` |
-| **Cloudflare R2** | `R2_ENDPOINT` | S3 API endpoint URL | `https://a1b2c3d4e5f67890abcdef1234567890.r2.cloudflarestorage.com` |
-| **Cloudflare R2** | `R2_PUBLIC_DOMAIN` | *(Optional)* Public CDN domain | `https://media.iconelectromatic.com` |
-| **Resend** | `RESEND_API_KEY` | Resend API sending key | `re_123456789_abcdefghijklmnopqrstuv` |
-| **Resend** | `RESEND_FROM_EMAIL` | Sender on verified domain | `notifications@iconelectromatic.com` |
-| **Resend** | `CONTACT_EMAIL` | Fallback recipient inbox | `sales@iconelectromatic.com` |
+| **Cloudflare R2** | `R2_ACCOUNT_ID` | Cloudflare account identifier | Client-provided; optional to application configuration |
+| **Cloudflare R2** | `R2_ACCESS_KEY_ID` | Bucket-scoped S3 API key ID | Store as a backend secret |
+| **Cloudflare R2** | `R2_SECRET_ACCESS_KEY` | Bucket-scoped S3 API secret | Store as a backend secret |
+| **Cloudflare R2** | `R2_BUCKET_NAME` | Client-selected bucket | Keep private by default |
+| **Cloudflare R2** | `R2_ENDPOINT` | S3 API endpoint URL | Obtain/derive from client account |
+| **Cloudflare R2** | `R2_PUBLIC_DOMAIN` | *(Optional)* Public media domain | Only if client enables public object delivery |
+| **Resend** | `RESEND_API_KEY` | Resend API sending key | Store as a backend secret |
+| **Resend** | `RESEND_FROM_EMAIL` | Sender on verified domain | Primary sender setting |
+| **Resend** | `CONTACT_EMAIL` | Fallback recipient inbox | Client-approved receiving mailbox |
 | **Corporate Mail Server** | *(Mailbox)* | India sales recipient | `salesiepl@iconelectromatic.com` |
 | **Corporate Mail Server** | *(Mailbox)* | Singapore sales recipient | `IESing@iconelectromatic.com` |
 | **Corporate Mail Server** | *(Mailbox)* | USA sales recipient | `salesiellc@iconelectromatic.com` |

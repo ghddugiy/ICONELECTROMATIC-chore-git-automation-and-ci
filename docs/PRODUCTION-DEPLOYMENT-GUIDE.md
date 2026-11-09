@@ -2,7 +2,11 @@
 
 **Project:** Icon Electromatic B2B Catalog & CMS  
 **Document Version:** 1.0  
-**Scope:** Backend Express API, Authentication, Cloudflare R2 Media, Resend Enquiries, and Production Security Hardening.
+**Scope:** Client-operated production hosting, backend/API routing, PostgreSQL, Cloudflare R2, Resend, and security configuration.
+
+**Deployment status:** Guidance only. The client chooses providers and performs
+deployment. No production host, database, DNS, email, or R2 configuration has
+been accessed or validated by the development team.
 
 ---
 
@@ -14,17 +18,17 @@ The Icon Electromatic backend is built with hardened production defenses designe
 [ Client Browser / Admin User ]
              │
              ▼  HTTPS (TLS 1.3)
-[ Reverse Proxy / CDN (e.g., Cloudflare / Vercel / Nginx) ]
+[ Static Host / Reverse Proxy / CDN (client-selected) ]
              │
-             ▼  Private Network / Filtered Headers (TRUST_PROXY=1)
-[ Express API Server ]
+             ▼  Private Network / Filtered Headers (verified TRUST_PROXY setting)
+[ Node.js 22 / Express API Server ]
     ├── Helmet Security Headers (nosniff, HSTS, SAMEORIGIN, CORP: cross-origin)
     ├── CORS Validation (Strict FRONTEND_URL matching in production)
     ├── Rate Limiting (IP & Email independent buckets, reset on success)
     ├── Dual-token Session & CSRF Validation (__Host- cookies + SHA-256 DB check)
     └── Safe Error Handling (Internal details masked, CORS 403, Payload 413)
              │
-             ├── [ Local / Managed PostgreSQL (Prisma ORM) ]
+             ├── [ Managed PostgreSQL (Prisma ORM) ]
              ├── [ Cloudflare R2 Object Storage (Private Bucket) ]
              └── [ Resend API (Transactional Enquiry Email) ]
 ```
@@ -33,24 +37,35 @@ The Icon Electromatic backend is built with hardened production defenses designe
 
 ## 2. Required Production Environment Variables
 
-Never commit `.env` files to Git. Configure these variables directly in your production hosting platform (e.g. Railway, Render, AWS ECS, or Vercel).
+Never commit `.env` files to Git. Configure backend variables in the
+client-selected Node.js hosting service's secret/config store. Build the
+frontend from the repository root. The backend needs the complete repository
+checkout, including `shared/`. CI uses Node.js 22. Production Docker
+infrastructure is not required.
 
 | Variable Name | Required | Example / Format | Purpose | Security Notes |
 |---|---|---|---|---|
 | `NODE_ENV` | **Yes** | `production` | Enables production mode | Enforces `__Host-` cookies, `Secure` flags, and strict CORS. |
-| `PORT` | **Yes** | `5000` | Server listening port | Ensure port is internal or proxied; not directly exposed if behind Nginx. |
+| `PORT` | Provider-dependent | Provider-assigned port; app default `5000` | Server listening port | Use the port required by the selected host. |
 | `FRONTEND_URL` | **Yes** | `https://iconelectromatic.com,https://www.iconelectromatic.com` | Allowed CORS origins | In production, **only** origins listed here are accepted. Localhost is blocked. |
-| `TRUST_PROXY` | **Yes** | `1` | Number of upstream proxy hops | Set to `1` behind a single reverse proxy (Vercel, Render, Railway, AWS ALB). Never set `true` without header sanitization. |
+| `TRUST_PROXY` | Topology-dependent | Exact trusted proxy configuration | Express proxy trust used for client IP resolution | Configure from the selected provider's documented forwarding chain. Do not copy a generic value or trust client-supplied forwarding headers. |
 | `DATABASE_URL` | **Yes** | `postgresql://user:pass@host:5432/db?schema=public` | Prisma PostgreSQL connection | Use SSL mode (`sslmode=require`) in cloud hosting. |
-| `RESEND_API_KEY` | **Yes** | `re_abc123...` | Resend API key | Keep secret. Restrict permissions to sending only. |
-| `ENQUIRY_FROM` | **Yes** | `sales@iconelectromatic.com` | Outgoing email sender | Must match a verified domain in Resend. |
-| `CONTACT_EMAIL` | **Yes** | `info@iconelectromatic.com` | Inbox receiving form submissions | Confirm destination mailbox with client stakeholders. |
-| `R2_ACCOUNT_ID` | **Yes** | `32-character hex string` | Cloudflare account ID | Found in Cloudflare R2 dashboard. |
-| `R2_ACCESS_KEY_ID` | **Yes** | `32-character string` | R2 S3 API access key | Generated via Cloudflare R2 API Tokens. |
-| `R2_SECRET_ACCESS_KEY` | **Yes** | `64-character string` | R2 S3 API secret key | Generated via Cloudflare R2 API Tokens. |
-| `R2_BUCKET_NAME` | **Yes** | `icon-electromatic-media` | Cloudflare R2 bucket name | Bucket should remain private. |
+| `RESEND_API_KEY` | Required for live email | Secret from Resend | Resend sending API key | Keep in the backend secret store; use least privilege available. |
+| `RESEND_FROM_EMAIL` | Required for live email | Sender on verified domain | Outgoing email sender | Primary setting. `ENQUIRY_FROM` is a legacy fallback only. |
+| `CONTACT_EMAIL` | Required for live email | Client-approved fallback inbox | Recipient for general enquiries and career applications | Confirm mailbox with client stakeholders. |
+| `R2_ACCOUNT_ID` | Optional in app config | Cloudflare account identifier | Account reference | Endpoint is separately configured in `R2_ENDPOINT`. |
+| `R2_ACCESS_KEY_ID` | Required for R2 | Secret from provider | R2 S3 API access key | Scope to the application bucket. |
+| `R2_SECRET_ACCESS_KEY` | Required for R2 | Secret from provider | R2 S3 API secret | Never expose to frontend build configuration. |
+| `R2_BUCKET_NAME` | Required for R2 | Client-selected bucket | R2 bucket name | Prefer private access; app uploads and retrieves through backend. |
 | `R2_ENDPOINT` | **Yes** | `https://<ID>.r2.cloudflarestorage.com` | R2 S3 compatibility endpoint | Cloudflare S3 endpoint URL. |
-| `R2_PUBLIC_DOMAIN` | Optional | `https://media.iconelectromatic.com` | Public CDN URL for assets | If omitted, backend streams media directly or signs 15-minute URLs. |
+| `R2_PUBLIC_DOMAIN` | Optional | Client-configured HTTPS domain | Public media domain | When configured, media delivery redirects there; otherwise the backend streams from the private bucket or uses a short-lived signed URL fallback. |
+
+`SITE_ORIGIN` configures the backend's canonical sitemap origin.
+`ADMIN_EMAIL` and `ADMIN_PASSWORD` are temporary inputs for non-interactive
+admin provisioning. `PRODUCTION_DATABASE_URL` is used only by the optional
+production catalogue seeder. `VITE_API_BASE_URL` and `VITE_SITE_ORIGIN` are
+frontend build-time variables; `window.__ICON_API_BASE__` is a runtime override,
+not an environment variable.
 
 ---
 
@@ -60,22 +75,106 @@ Never commit `.env` files to Git. Configure these variables directly in your pro
 1. **Direct Connection (Development / Self-hosted without reverse proxy):**
    * Set `TRUST_PROXY=false` or leave blank.
    * Express will derive client IP directly from `req.socket.remoteAddress`, preventing IP spoofing via attacker-supplied `X-Forwarded-For` headers.
-2. **Behind Single Reverse Proxy (Cloudflare / Vercel / Railway / Render / AWS ALB):**
-   * Set `TRUST_PROXY=1`.
-   * Express trusts the last IP added by the front-facing proxy, accurately tracking client IPs for rate limiting.
-3. **Multi-hop / Private Subnets:**
-   * Set `TRUST_PROXY=loopback,10.0.0.0/8` to explicitly trust specific internal proxy subnets.
+2. **Behind a reverse proxy or managed platform:**
+   * First verify that the backend is reachable only through the intended
+     proxy and that the proxy removes or overwrites client-supplied forwarding
+     headers with its own trusted values.
+   * Then configure `TRUST_PROXY` to match only that verified proxy topology,
+     using provider-documented addresses or a reviewed hop configuration.
+     Never trust arbitrary forwarded headers, set `TRUST_PROXY=true`, or copy
+     a hop count/subnet example without proving the network path and header
+     sanitization. Incorrect trust can enable spoofed client IPs and undermine
+     IP-based rate limits.
+3. **Unknown or unverified topology:**
+   * Leave `TRUST_PROXY` unset or set it to `false` until the actual proxy and
+     header behavior have been verified. This may cause the application to see
+     the proxy address rather than the visitor address, but avoids trusting
+     unverified forwarding headers.
 
-### Domain Strategy & Cookie Scope
+### Domain strategy & cookie scope
 To guarantee seamless session management and CSRF defense:
 * **Recommended Architecture (Same-Origin Reverse Proxy):**
   * Serve the frontend at `https://iconelectromatic.com` and reverse-proxy `/api/*` to the backend.
   * In this configuration, requests are same-origin. Cookies use the `__Host-` prefix (`__Host-admin_session`, `__Host-admin_csrf`) with `SameSite=Lax; Secure; Path=/`.
-* **Cross-Subdomain Architecture (`iconelectromatic.com` and `api.iconelectromatic.com`):**
-  * Allowed in modern browsers because both origins share the parent registrable domain.
-  * Ensure `FRONTEND_URL` contains `https://iconelectromatic.com`.
+* A separate API subdomain without a same-origin proxy is not the recommended
+  setup for this cookie model. Review authentication and CORS behavior before
+  choosing a different topology.
+
+### Vercel frontend routing
+
+The current [vercel.json](../vercel.json) defines the build command/output,
+rewrites `/sitemap.xml` to same-origin `/api/sitemap.xml`, and sends other
+unmatched paths to `/index.html`. It does not configure a backend API origin or
+an `/api/*` rewrite to a separate Node.js service. After the client chooses the
+backend host, add an explicit API rewrite before the SPA catch-all, preserving
+the `/api/...` path. Route `/sitemap.xml` to the backend's dynamic sitemap route
+as well. The rewrite destination is a deployment decision and is deliberately
+left as a placeholder here; do not deploy an unresolved placeholder.
+
+### Optional Nginx template
+
+The copyable placeholder-based configuration is
+[Nginx template](./templates/nginx.conf.example). It routes
+the SPA/static files, `/api/`, and `/sitemap.xml` through one HTTPS origin.
+Replace the domain, private backend address/port, deployed `dist/` path, and TLS
+certificate paths. Restrict backend network access to the proxy and set
+`TRUST_PROXY` only to match the verified proxy chain. If a CDN is in front,
+configure its trusted real-client-IP handling before relying on IP-based rate
+limits. The client must review TLS policy, security headers, upload/proxy
+timeouts, and certificate renewal before use.
 
 ---
+
+### Build, migration, and startup commands
+
+Run these commands in the client's approved deployment environment, after
+confirming the target services and secrets:
+
+```bash
+# Repository root: install frontend dependencies and build static output
+npm ci
+npm run build
+
+# Backend package: install dependencies, apply pending Prisma migrations, start
+cd backend
+npm ci
+npm run migrate
+npm start
+```
+
+`npm run migrate` executes `prisma migrate deploy`; it applies checked-in
+migrations and does not reset the database. Back up and verify the target before
+running it. The backend start command is `npm start` (`node src/server.js`).
+
+Provision the first admin interactively from `backend/`:
+
+```bash
+node scripts/provision-admin.js
+```
+
+For non-interactive provisioning, set `ADMIN_EMAIL` and `ADMIN_PASSWORD` through
+the provider's secret store and run from `backend/`:
+
+```bash
+node scripts/provision-admin.js --non-interactive
+```
+
+Never put the password in arguments or logs.
+
+The optional baseline seed command is `npm run seed:production-catalog` from
+`backend/`. It performs read-only inspection by default. Applying requires
+`PRODUCTION_DATABASE_URL`, `--apply`, and an exact explicit target confirmation;
+it refuses local/test targets and does not replace an existing catalogue. See
+the safety steps in [CLIENT-HANDOVER-GUIDE.md](./CLIENT-HANDOVER-GUIDE.md) before
+using it. The seeder requires `sslmode=verify-full` to authenticate the server
+certificate and hostname; this stricter requirement applies to
+`PRODUCTION_DATABASE_URL`, separately from the runtime `DATABASE_URL` guidance
+above.
+
+See [DISASTER-RECOVERY-RUNBOOK.md](./DISASTER-RECOVERY-RUNBOOK.md) for client-
+authorized backup, restore, migration incident, and recovery verification
+procedures. For field definitions and database relationships, see
+[DATA-DICTIONARY.md](./DATA-DICTIONARY.md).
 
 ## 4. Hardened Security Defenses
 
@@ -110,11 +209,13 @@ Before pointing production DNS to the servers:
 
 - [ ] `NODE_ENV=production` is set in the hosting provider dashboard.
 - [ ] `FRONTEND_URL` is set to the exact production domain(s) with `https://`.
-- [ ] `TRUST_PROXY` is configured according to the hosting environment (`1` for standard PaaS).
+- [ ] `TRUST_PROXY` is configured for the verified trusted proxy chain, not copied from a generic example.
 - [ ] PostgreSQL connection string uses `sslmode=require` and a dedicated non-superuser database account.
-- [ ] Cloudflare R2 bucket is private and CORS rules on R2 allow image rendering.
-- [ ] Resend sender domain `iconelectromatic.com` has verified DNS records (SPF, DKIM, DMARC).
+- [ ] Cloudflare R2 bucket remains private unless the client intentionally configures `R2_PUBLIC_DOMAIN`; backend upload/delivery is verified without exposing credentials.
+- [ ] Resend domain is verified using the exact records shown in the client's account; SPF/DMARC changes are coordinated with the mail administrator.
+- [ ] Backend migrations ran with `npm run migrate` only after verifying the target and backup.
+- [ ] The first admin was provisioned through the interactive or secret-store-based non-interactive command; temporary provisioning secrets are removed.
 - [ ] `backend/.env` is NOT tracked in Git (`git status` clean).
-- [ ] Automated security test suite (`node --test`) passes with 100% success.
-- [ ] Frontend production build (`npm run build`) builds clean without errors.
-
+- [ ] Frontend production build (`npm run build`) succeeds and publishes the generated `dist/` output.
+- [ ] `/api/*` and `/sitemap.xml` reach the backend through the same public origin; the SPA fallback does not serve HTML to API requests.
+- [ ] DNS points to the chosen frontend host, HTTPS certificates are valid, and HTTP redirects to HTTPS.

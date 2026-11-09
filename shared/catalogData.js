@@ -2394,7 +2394,7 @@ export function getTotalProductCount() { return CATALOG.reduce((t, o) => t + o.c
 export function getTotalCategoryCount() { return CATALOG.reduce((t, o) => t + o.categories.length, 0); }
 export function getTotalOEMCount() { return CATALOG.length; }
 
-export function getPopularProducts() {
+export function getPopularProducts(catalog = CATALOG) {
   const flags = [
     { oemId: 'rogers-corporation', catId: 'rt-duroid', prodName: 'RT/duroid 5880' },
     { oemId: 'rogers-corporation', catId: 'ro400-series', prodName: 'RO4350B' },
@@ -2411,9 +2411,9 @@ export function getPopularProducts() {
 
   const results = [];
   for (const item of flags) {
-    const oem = getOEM(item.oemId);
+    const oem = catalog.find(entry => entry.id === item.oemId);
     if (!oem) continue;
-    const cat = getCategory(item.oemId, item.catId);
+    const cat = oem.categories.find(entry => entry.id === item.catId);
     if (!cat) continue;
     const prod = cat.products.find(p => p.name.toLowerCase().includes(item.prodName.toLowerCase())) || cat.products[0];
     if (prod) {
@@ -2433,4 +2433,3 @@ export function getPopularProducts() {
   }
   return results;
 }
-

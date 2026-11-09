@@ -65,7 +65,7 @@ export function renderAboutPage() {
         <div class="container" style="position:relative;z-index:2;">
           <!-- Breadcrumb -->
           <nav class="breadcrumb-dark">
-            <a href="#/" data-route="/">Home</a>
+            <a href="/" data-route="/">Home</a>
             <span class="sep"><i class="fa-solid fa-chevron-right" style="font-size:0.7rem;"></i></span>
             <span class="crumb-current" style="color:var(--text-white);font-weight:600;">About Us</span>
           </nav>

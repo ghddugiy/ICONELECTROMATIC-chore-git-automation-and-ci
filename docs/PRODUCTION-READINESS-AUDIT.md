@@ -5,18 +5,44 @@
 **Audit Scope:** Comprehensive Read-Only Audit (Frontend, Backend, Admin CMS, PostgreSQL/Prisma, Image Management, SEO, Contact/Careers, Deployment Portability, Code Quality & Security)
 **Status Key:** `PASS` | `PARTIAL` | `FAIL` | `NOT VERIFIED` | `NOT IMPLEMENTED` | `NOT APPLICABLE`
 
+> **Dated audit snapshot (2026-11-05):** This document records findings from
+> that audit date; it is not a live deployment validation or the current
+> deployment runbook. Later implementation and handover decisions may supersede
+> individual findings. In particular, the current `vercel.json` does not proxy
+> `/api/*` to a separate backend service. See
+> [CLIENT-HANDOVER-GUIDE.md](./CLIENT-HANDOVER-GUIDE.md) and
+> [PRODUCTION-DEPLOYMENT-GUIDE.md](./PRODUCTION-DEPLOYMENT-GUIDE.md) for current
+> client deployment guidance.
+
+### Follow-up corrections (2026-11-10)
+
+- The unsupported homepage hero statistics and certification claims described
+  under `FINDING-L1` were removed from the homepage rendering and default
+  content. No replacement claims were added. The finding below is retained as
+  historical audit evidence, not as the current homepage state.
+- A Content Security Policy (CSP) is not enabled: Helmet's CSP middleware is
+  explicitly disabled in `backend/src/server.js`. A restrictive policy is not
+  safe to enable as a drop-in because the current UI uses inline style
+  attributes, Google Fonts and Font Awesome CDN resources, dynamic media
+  origins, and API connections. Before enforcing CSP, inventory runtime
+  origins and inline behavior, then deploy a report-only policy on representative
+  pages and resolve violations before enforcement.
+
 ---
 
 ## 1. Executive Summary
 
-This production-readiness audit was conducted on the complete Icon Electromatic codebase to assess its stability, security, maintainability, architectural integrity, and handover viability. The client will manage production deployment and hosting; our obligation is to ensure the code is production-ready, portable, and thoroughly documented.
+This read-only audit assessed the codebase as of 2026-11-05. It is a historical
+snapshot, not a current deployment certification. The client manages production
+hosting; provider-specific configuration and live infrastructure remain
+unverified.
 
 ### Key Audit Findings Summary
 * **Backend Security & Core API Architecture (`PASS`)**: The Express backend demonstrates exceptional engineering standards. Administrative authentication employs Node.js native `scrypt` hashing with OWASP-recommended parameters, constant-time verification, cryptographic CSRF double-submit token hashing, independent IP and account login rate-limiting, Helmet security headers, 250 KB JSON payload limits, 10 MB magic-byte upload filtering, and clean 400/413/500 error masking.
 * **Catalog Data Synchronization (`PASS`)**: The catalog hierarchy (15 OEMs, 88 Categories, 169 Products) is fully integrated between the Admin CMS, the Express API, and PostgreSQL. Public product detail pages and catalog listings dynamically fetch live records with resilient fallback handling.
 * **Non-Catalog CMS Content Synchronization (`PARTIAL / HIGH RISK`)**: While catalog changes persist to PostgreSQL, website content for the Homepage (hero, stats, capabilities), Header/Footer settings, Testimonials, Projects, Gallery, and Blogs is currently saved to browser `localStorage` (`cms_${pageKey}`) via `ContentService.saveData()`. These non-catalog edits **do not persist to PostgreSQL and are invisible to other users and devices**.
 * **Excel / Spreadsheet Integration (`NOT IMPLEMENTED`)**: Contact/RFQ and Careers submissions are stored in PostgreSQL and dispatched to company inboxes via Resend. No Excel, Google Sheets, or Microsoft Graph integration exists.
-* **Deployment Portability (`PASS with Topology Requirements`)**: The application is highly portable across standard container or cloud architectures (Vercel, Render, Railway, AWS, Docker). It requires same-origin reverse-proxy routing (pre-configured in `vercel.json` or standard Nginx) to satisfy RFC 6265bis `__Host-` cookie security.
+* **Deployment Portability (`NOT VERIFIED`)**: The repository contains a static frontend build and a Node.js/Express backend. A same-origin reverse proxy is recommended for the admin cookie model. No production provider has been validated; the current `vercel.json` does not proxy `/api/*` to a separate backend.
 
 ---
 
@@ -53,7 +79,7 @@ This production-readiness audit was conducted on the complete Icon Electromatic 
 
 | Area | Status | Evidence & Details |
 |---|:---:|---|
-| **Homepage & Navigation** | `PARTIAL` | Navigation routes (`/`, `/about`, `/partners`, `/products`, `/services`, `/blogs`, `/contact`) work cleanly via HTML5 history router (`src/router.js`). However, `src/pages/Home.js` (lines 16–19) contains hardcoded placeholder figures: `"4,000+"` products and `"24+"` component lines instead of dynamic catalog counts. |
+| **Homepage & Navigation** | `PARTIAL` | Navigation routes (`/`, `/about`, `/partners`, `/products`, `/services`, `/blogs`, `/contact`) work cleanly via HTML5 history router (`src/router.js`). The unsupported homepage hero figures noted in this historical audit have since been removed; no replacement figures should be added without documented client evidence. |
 | **Search & Filtering** | `PARTIAL` | On `/products`, search and frequency-band filtering work across active catalog items. However, the global header search modal (`src/components/Header.js`) searches static `CATALOG` from `catalogData.js` directly, meaning newly added backend products will not appear in global header search until a rebuild. |
 | **Product Listing & Details** | `PASS` | `Products.js` loads the hierarchical catalog via `CatalogService.getPublicCatalog()`. `ProductDetail.js` queries `CatalogService.getPublicProduct(id)` with safe fallback to `findFallbackProduct()`. Specifications, applications, OEM logos, and canonical URLs render correctly. |
 | **Contact & RFQ Forms** | `PASS` | `src/pages/Contact.js` validates inputs and submits to `POST /api/enquiries/contact`. Loading spinners, error messages, and success confirmations function correctly. |
@@ -99,7 +125,7 @@ This production-readiness audit was conducted on the complete Icon Electromatic 
 * **Cookie Architecture (`PASS with Topology Requirement`)**:
   * Production cookie names: `__Host-admin_session` and `__Host-admin_csrf`.
   * Flags: `HttpOnly = true`, `Secure = true`, `SameSite = "lax"`, `Path = "/"`.
-  * **Topology Requirement**: In compliance with RFC 6265bis, `__Host-` cookies cannot be sent across different subdomains (e.g. from `iconelectromatic.com` to `api.iconelectromatic.com`). The production frontend and backend **must share the same origin** via reverse proxy or rewrites (pre-configured in `vercel.json`).
+  * **Topology Requirement**: The recommended topology serves the frontend and API through one public origin using a reverse proxy. The current `vercel.json` routes `/sitemap.xml` to same-origin `/api/sitemap.xml` and has an SPA fallback, but does not configure `/api/*` to a separate backend. The client must add the provider-specific backend rewrite after choosing the backend origin.
 * **Bundle Inspection (`PARTIAL / MEDIUM RISK`)**:
   * The Admin CMS UI code (`src/admin/Admin.js`) is compiled directly into the client bundle (`dist/assets/index-CNRZeONy.js`).
   * While unauthorized API mutations are strictly rejected by the backend, unauthenticated public visitors navigating to `/admin` can view the admin login screen and UI components. Code splitting (`React.lazy` or separate admin build) is recommended for post-handover enhancement.
@@ -212,19 +238,25 @@ This production-readiness audit was conducted on the complete Icon Electromatic 
 
 ---
 
-## 13. Deployment Portability
+## 13. Deployment Portability (snapshot)
 
-* **Node.js Compatibility**: Tested on Node.js v20.x and v22.x LTS.
-* **Supported Production Hosting Topologies**:
-  1. **Unified Host (Vercel / Cloudflare Pages + Serverless)**:
-     * Frontend deployed as static SPA.
-     * Express backend deployed as serverless functions or proxy.
-     * `vercel.json` rewrites `/api/:path*` to the backend, satisfying `__Host-` cookie same-origin requirements.
-  2. **Container / VPS (Docker / AWS ECS / Render / DigitalOcean)**:
-     * Nginx reverse proxy serving static `dist/` and proxying `/api/` to `localhost:5000`.
-     * Satisfies same-origin routing and `TRUST_PROXY=1`.
-* **Forbidden Architecture**:
-  * Separate subdomains (e.g. Frontend on `https://iconelectromatic.com` and Backend on `https://api.iconelectromatic.com`) **without a reverse proxy**. RFC 6265bis causes browsers to reject cross-subdomain `__Host-` cookies.
+* **Runtime:** The repository CI workflow selects Node.js 22. This audit did not
+  verify every Node.js version or any production hosting provider.
+* **Recommended topology:** Static frontend hosting plus a separately managed
+  Node.js backend, managed PostgreSQL, and a same-origin `/api/*` proxy. A
+  client-selected static host such as Vercel can serve the frontend; a client-
+  selected Node.js service can run the API. No backend host or API origin has
+  been confirmed.
+* **Vercel configuration evidence:** `vercel.json` currently specifies the
+  frontend build/output, a `/sitemap.xml` rewrite to `/api/sitemap.xml`, and an
+  SPA fallback. It does not contain a backend destination or an `/api/*` proxy.
+  Add those only after the client selects and supplies the backend origin.
+* **Self-managed alternative:** Nginx can serve `dist/` and proxy `/api/` and
+  the dynamic sitemap path to the backend. A placeholder example is maintained
+  in [PRODUCTION-DEPLOYMENT-GUIDE.md](./PRODUCTION-DEPLOYMENT-GUIDE.md).
+* **Topology caution:** The admin authentication cookie model is designed for
+  same-origin frontend/API use. A separate API subdomain without a reverse proxy
+  requires a separate authentication, cookie, and CORS review.
 
 ---
 
@@ -237,36 +269,36 @@ This production-readiness audit was conducted on the complete Icon Electromatic 
 
 #### B. High-Priority Issues (Count: 1)
 * **Finding ID: `FINDING-H1` — Non-Catalog CMS Content Stored Exclusively in LocalStorage**
-  * **File**: [`src/data/ContentService.js`](file:///c:/Users/archa/Desktop/Iconelecromatics/ICONELECTROMATIC-chore-git-automation-and-ci/src/data/ContentService.js#L661-L680), [`src/admin/Admin.js`](file:///c:/Users/archa/Desktop/Iconelecromatics/ICONELECTROMATIC-chore-git-automation-and-ci/src/admin/Admin.js#L600)
+  * **File**: [`src/data/ContentService.js`](../src/data/ContentService.js#L661-L680), [`src/admin/Admin.js`](../src/admin/Admin.js#L600)
   * **Evidence**: `ContentService.saveData(pageKey, data)` executes `localStorage.setItem('cms_' + pageKey, JSON.stringify(data))`.
   * **Impact**: Homepage hero text, capabilities, stats, header/footer settings, testimonials, and blogs edited in the Admin CMS are stored only on the admin's local device. Visitors on other browsers see initial defaults.
   * **Recommended Fix**: Add a simple generic PostgreSQL model (`SiteContent` with `pageKey` and JSON `content`) and corresponding authenticated backend endpoints (`GET /api/content/:pageKey`, `PUT /api/content/:pageKey`).
 
 #### C. Medium-Priority Issues (Count: 3)
 * **Finding ID: `FINDING-M1` — Admin CMS Code Compiled into Public Bundle**
-  * **File**: [`src/admin/Admin.js`](file:///c:/Users/archa/Desktop/Iconelecromatics/ICONELECTROMATIC-chore-git-automation-and-ci/src/admin/Admin.js), [`src/router.js`](file:///c:/Users/archa/Desktop/Iconelecromatics/ICONELECTROMATIC-chore-git-automation-and-ci/src/router.js#L28)
+  * **File**: [`src/admin/Admin.js`](../src/admin/Admin.js), [`src/router.js`](../src/router.js#L28)
   * **Evidence**: `Admin.js` is imported directly into the router, compiling ~5,500 lines of admin code into `dist/assets/index-CNRZeONy.js`.
   * **Impact**: While backend APIs are strictly secured, unauthenticated users can access the `/admin` UI shell.
   * **Recommended Fix**: Code-split the admin interface using dynamic `import()` so it is loaded on demand.
 * **Finding ID: `FINDING-M2` — Global Search Searches Static Data Rather than PostgreSQL**
-  * **File**: [`src/components/Header.js`](file:///c:/Users/archa/Desktop/Iconelecromatics/ICONELECTROMATIC-chore-git-automation-and-ci/src/components/Header.js#L8)
+  * **File**: [`src/components/Header.js`](../src/components/Header.js#L8)
   * **Evidence**: `import { CATALOG } from '../data/catalogData.js';` is used to filter search query results.
   * **Impact**: Products added via Admin CMS do not appear in the header search dropdown until a new static build is deployed.
   * **Recommended Fix**: Wire header search to `CatalogService.getCurrentPublicCatalog()`.
 * **Finding ID: `FINDING-M3` — Same-Origin Topology Dependency for `__Host-` Cookies**
-  * **File**: [`backend/src/routes/auth.js`](file:///c:/Users/archa/Desktop/Iconelecromatics/ICONELECTROMATIC-chore-git-automation-and-ci/backend/src/routes/auth.js#L30-L50)
+  * **File**: [`backend/src/routes/auth.js`](../backend/src/routes/auth.js#L30-L50)
   * **Evidence**: Cookies use `__Host-` prefix in production.
   * **Impact**: Prevents split-domain hosting unless an API reverse proxy is configured.
   * **Recommended Fix**: Document the reverse-proxy requirement in the handover guide.
 
 #### D. Low-Priority Issues (Count: 3)
-* **Finding ID: `FINDING-L1` — Hardcoded Placeholder Stats in Homepage**
-  * **File**: [`src/pages/Home.js`](file:///c:/Users/archa/Desktop/Iconelecromatics/ICONELECTROMATIC-chore-git-automation-and-ci/src/pages/Home.js#L16-L19)
-  * **Evidence**: `statsList = [{ value: '4,000+', label: 'PRODUCTS AVAILABLE' }, { value: '24+', label: 'COMPONENT LINES' }]`.
-  * **Impact**: Inaccurate figures displayed on homepage hero.
-  * **Recommended Fix**: Derive stats dynamically from catalog counts (e.g. `160+` products, `15` OEM partners).
+* **Finding ID: `FINDING-L1` — Hardcoded Placeholder Stats in Homepage (Resolved)**
+  * **File**: [`src/pages/Home.js`](../src/pages/Home.js), [`src/data/ContentService.js`](../src/data/ContentService.js)
+  * **Evidence**: At the audit date, placeholder hero stats were hard-coded in the page and default content. Follow-up review removed the homepage stats display and unsupported defaults.
+  * **Impact**: The audit-date figures were unsupported; no replacement numbers or certification claims have been added.
+  * **Recommended Fix**: Resolved for the current homepage. Do not reinstate public claims without documented client evidence.
 * **Finding ID: `FINDING-L2` — Absence of Turnstile / CAPTCHA on Public Forms**
-  * **File**: [`backend/src/routes/enquiries.js`](file:///c:/Users/archa/Desktop/Iconelecromatics/ICONELECTROMATIC-chore-git-automation-and-ci/backend/src/routes/enquiries.js#L218)
+  * **File**: [`backend/src/routes/enquiries.js`](../backend/src/routes/enquiries.js#L218)
   * **Evidence**: Relies on honeypots and IP rate limits without cryptographic bot verification.
   * **Impact**: Sophisticated headless bot networks could submit spam inquiries.
   * **Recommended Fix**: Add Cloudflare Turnstile if automated spam becomes an operational issue.

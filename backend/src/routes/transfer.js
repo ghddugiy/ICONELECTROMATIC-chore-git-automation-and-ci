@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import prisma from "../db.js";
 import requireAdmin from "../middleware/requireAdmin.js";
 import { ApiError, asyncHandler } from "./common.js";
-import { CATALOG } from "../../../src/data/catalogData.js";
+import { CATALOG } from "../../../shared/catalogData.js";
 
 function isValidHttpUrl(string) {
   if (!string || typeof string !== "string") return false;

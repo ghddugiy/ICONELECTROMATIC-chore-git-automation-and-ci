@@ -3,7 +3,7 @@
  * Comprehensive engineering news, video releases, whitepapers, and official links
  * covering all 15 manufacturing partner OEMs.
  */
-import { CATALOG } from './catalogData.js';
+import { CATALOG } from '../../shared/catalogData.js';
 
 export const OEM_BLOGS = [
   {

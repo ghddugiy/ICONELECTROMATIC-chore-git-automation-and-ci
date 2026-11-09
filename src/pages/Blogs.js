@@ -4,9 +4,10 @@
  * Displays all 15 manufacturing partner OEMs, technical news releases,
  * demonstration videos, application notes, and official technical website links.
  */
-import { CATALOG } from '../data/catalogData.js';
+import { CATALOG } from '../../shared/catalogData.js';
 import { OEM_BLOGS } from '../data/blogData.js';
 import { ContentService } from '../data/ContentService.js';
+import { getRouteSearchParams, navigate } from '../router.js';
 
 function getBlogCmsData() {
   const cms = ContentService.getData('blogs');
@@ -84,9 +85,7 @@ function getActiveOemContentCount(oemId) {
 }
 
 export function renderBlogsPage() {
-  const hash = window.location.hash || '';
-  const queryStr = hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : '';
-  const searchParams = new URLSearchParams(queryStr);
+  const searchParams = getRouteSearchParams();
   const selectedOemId = searchParams.get('oem') || '';
   const activeTab = searchParams.get('tab') || 'all';
 
@@ -314,7 +313,7 @@ function renderAllOemsBlogView() {
           <span style="font-size:0.8rem;color:var(--text-gray-400);">
             <i class="fa-solid fa-shield-check" style="color:var(--success);margin-right:5px;"></i> Official Technical Dispatch
           </span>
-          <a class="btn-relay-blue" id="modal-article-rfq-link" href="#/contact?subject=technical">
+          <a class="btn-relay-blue" id="modal-article-rfq-link" href="/contact?subject=technical">
             <i class="fa-solid fa-paper-plane"></i> Inquire on this Technology
           </a>
         </div>
@@ -380,7 +379,7 @@ function renderSingleOemBlogView(oem, blog, activeTab) {
               <button class="btn-relay-dark" id="back-to-all-oems-btn">
                 <i class="fa-solid fa-arrow-left"></i> All OEMs
               </button>
-              <a class="btn-relay-blue" href="#/contact?subject=technical&oem=${encodeURIComponent(oem.name)}">
+              <a class="btn-relay-blue" href="/contact?subject=technical&oem=${encodeURIComponent(oem.name)}">
                 <i class="fa-solid fa-paper-plane"></i> Technical Inquiry
               </a>
             </div>
@@ -522,7 +521,7 @@ function renderSingleOemBlogView(oem, blog, activeTab) {
                     `).join('')}
                   </ul>
 
-                  <a class="btn-relay-border" href="#/contact?subject=technical&oem=${encodeURIComponent(oem.name)}" style="width:100%;justify-content:center;margin-top:auto;">
+                  <a class="btn-relay-border" href="/contact?subject=technical&oem=${encodeURIComponent(oem.name)}" style="width:100%;justify-content:center;margin-top:auto;">
                     <i class="fa-solid fa-paper-plane"></i> Request Engineering Consultation
                   </a>
                 </div>
@@ -547,7 +546,7 @@ function renderSingleOemBlogView(oem, blog, activeTab) {
             <a class="btn-relay-dark" data-route="/products?level=categories&oem=${oem.id}">
               <i class="fa-solid fa-boxes-stacked"></i> Browse Catalog
             </a>
-            <a class="btn-relay-blue" href="#/contact?subject=rfq&oem=${encodeURIComponent(oem.name)}">
+            <a class="btn-relay-blue" href="/contact?subject=rfq&oem=${encodeURIComponent(oem.name)}">
               <i class="fa-solid fa-file-invoice"></i> Request Quote for ${oem.shortName}
             </a>
           </div>
@@ -571,7 +570,7 @@ function renderSingleOemBlogView(oem, blog, activeTab) {
           <span style="font-size:0.8rem;color:var(--text-gray-400);">
             <i class="fa-solid fa-shield-check" style="color:var(--success);margin-right:5px;"></i> Official Technical Bulletin
           </span>
-          <a class="btn-relay-blue" id="modal-article-rfq-link" href="#/contact?subject=technical">
+          <a class="btn-relay-blue" id="modal-article-rfq-link" href="/contact?subject=technical">
             <i class="fa-solid fa-paper-plane"></i> Inquire on this Technology
           </a>
         </div>
@@ -600,9 +599,7 @@ function renderSingleOemBlogView(oem, blog, activeTab) {
 }
 
 export function initBlogsPage() {
-  const hash = window.location.hash || '';
-  const queryStr = hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : '';
-  const searchParams = new URLSearchParams(queryStr);
+  const searchParams = getRouteSearchParams();
   const selectedOemId = searchParams.get('oem') || '';
 
   // OEM Card click in "All OEMs" grid
@@ -610,7 +607,7 @@ export function initBlogsPage() {
     card.addEventListener('click', () => {
       const oemId = card.getAttribute('data-oem-id');
       if (oemId) {
-        window.location.hash = `#/blogs?oem=${oemId}`;
+        navigate(`/blogs?${new URLSearchParams({ oem: oemId })}`);
       }
     });
   });
@@ -620,19 +617,19 @@ export function initBlogsPage() {
     btn.addEventListener('click', () => {
       const oemId = btn.getAttribute('data-oem-select');
       if (oemId) {
-        window.location.hash = `#/blogs?oem=${oemId}`;
+        navigate(`/blogs?${new URLSearchParams({ oem: oemId })}`);
       }
     });
   });
 
   // "All 15 OEMs" chip
   document.querySelector('.blogs-oem-chip[data-filter="all"]')?.addEventListener('click', () => {
-    window.location.hash = '#/blogs';
+    navigate('/blogs');
   });
 
   // Back to All OEMs button in single OEM view
   document.getElementById('back-to-all-oems-btn')?.addEventListener('click', () => {
-    window.location.hash = '#/blogs';
+    navigate('/blogs');
   });
 
   // Tab switching in single OEM view
@@ -640,7 +637,7 @@ export function initBlogsPage() {
     btn.addEventListener('click', () => {
       const tab = btn.getAttribute('data-tab');
       if (selectedOemId && tab) {
-        window.location.hash = `#/blogs?oem=${selectedOemId}&tab=${tab}`;
+        navigate(`/blogs?${new URLSearchParams({ oem: selectedOemId, tab })}`);
       }
     });
   });
@@ -677,7 +674,7 @@ export function initBlogsPage() {
       `;
     }
     if (modalRfqLink) {
-      modalRfqLink.href = `#/contact?subject=technical&oem=${encodeURIComponent(article.oemName || '')}&product=${encodeURIComponent(article.title)}`;
+      modalRfqLink.href = `/contact?subject=technical&oem=${encodeURIComponent(article.oemName || '')}&product=${encodeURIComponent(article.title)}`;
     }
     articleModal.classList.add('open');
   }

@@ -108,7 +108,7 @@ export function renderProductCard(product, index = 0) {
           <a class="relay-inquire-btn" href="${detailRoute}" data-route="/product/${encodeURIComponent(product.id || '')}">
             <span>View Specs</span> <i class="fa-solid fa-arrow-right" style="font-size:0.7rem;margin-left:2px;"></i>
           </a>
-          <a class="relay-rfq-btn" href="#/contact?subject=rfq&model=${encodeURIComponent(name)}&product=${encodeURIComponent(name)}&oem=${encodeURIComponent(oemName)}" style="background:${oemAccent};">
+          <a class="relay-rfq-btn" href="/contact?subject=rfq&model=${encodeURIComponent(name)}&product=${encodeURIComponent(name)}&oem=${encodeURIComponent(oemName)}" style="background:${oemAccent};">
             <span>Request RFQ</span>
           </a>
         </div>

@@ -13,13 +13,28 @@ export function registerRoute(path, handler) {
   routes[cleanPath] = handler;
 }
 
+export function getRouteSearchParams(
+  location = typeof window !== 'undefined'
+    ? window.location
+    : { search: '', hash: '' }
+) {
+  if (location.search) {
+    return new URLSearchParams(location.search);
+  }
+
+  const hash = location.hash || '';
+  const queryIndex = hash.indexOf('?');
+  return new URLSearchParams(queryIndex === -1 ? '' : hash.slice(queryIndex + 1));
+}
+
 export function navigate(path) {
   let clean = path || '/';
   if (!clean.startsWith('/')) clean = '/' + clean;
   if (clean.length > 1 && clean.endsWith('/')) clean = clean.slice(0, -1);
 
   if (typeof window !== 'undefined') {
-    if (window.location.pathname !== clean || window.location.hash) {
+    const currentUrl = `${window.location.pathname}${window.location.search}`;
+    if (currentUrl !== clean || window.location.hash) {
       window.history.pushState(null, '', clean);
     }
   }
@@ -115,7 +130,7 @@ export function handleRoute() {
           <div style="min-height: 80vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 40px; color: #fff;">
             <h1 style="font-size: 2rem; margin-bottom: 16px; color: #dd2b1c;">Unable to display page</h1>
             <p style="color: #94a3b8; max-width: 500px; margin-bottom: 24px;">An error occurred while loading this section.</p>
-            <a href="#/" class="btn-relay-red" onclick="window.location.reload()">Reload Home</a>
+            <a href="/" data-route="/" class="btn-relay-red">Return Home</a>
           </div>
         `;
       }

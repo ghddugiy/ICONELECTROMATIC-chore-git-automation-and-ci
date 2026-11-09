@@ -479,28 +479,44 @@ test("POST /api/media/upload executes rollback cleanup if database insert fails 
   }
 });
 
-// Skip in CI: requires a live Cloudflare R2 bucket with valid credentials.
-test("LIVE R2 INTEGRATION: Uploads test 1x1 image, verifies presence, and deletes from icon-electromatic-media bucket", { skip: process.env.CI === "true" }, async () => {
+// Live writes require explicit opt-in and a dedicated non-production bucket.
+test("LIVE R2 INTEGRATION: uploads, verifies, and deletes a unique test object", {
+  skip:
+    process.env.CI === "true" ||
+    process.env.RUN_LIVE_R2_TESTS !== "true",
+}, async () => {
+  const configuredBucket = getR2Config().bucketName;
+  const testBucket = process.env.R2_TEST_BUCKET_NAME;
+  assert.ok(testBucket, "R2_TEST_BUCKET_NAME must identify an approved test bucket");
+  assert.notEqual(
+    testBucket,
+    "icon-electromatic-media",
+    "Live integration tests must never use the production bucket"
+  );
+  assert.equal(configuredBucket, testBucket, "R2_BUCKET_NAME must match R2_TEST_BUCKET_NAME");
+
   const testKey = `test-health/${crypto.randomUUID()}.png`;
   const sha256 = computeSha256(VALID_1X1_PNG);
+  let uploadAttempted = false;
 
   try {
-    // 1. Upload to live Cloudflare R2 bucket
+    uploadAttempted = true;
     await uploadToR2({
       key: testKey,
       buffer: VALID_1X1_PNG,
       mimeType: "image/png",
       metadata: { test: "health-check", sha256 },
+      bucketName: testBucket,
     });
 
-    // 2. Verify object exists via HeadObject
-    const head = await headObject(testKey);
+    const head = await headObject(testKey, undefined, testBucket);
     assert.ok(head, "Expected object to exist in R2 bucket");
     assert.equal(head.ContentType, "image/png");
     assert.equal(head.ContentLength, VALID_1X1_PNG.length);
   } finally {
-    // 3. Clean up the test object to maintain a clean bucket
-    await deleteFromR2(testKey);
+    if (uploadAttempted) {
+      await deleteFromR2(testKey, undefined, testBucket);
+    }
   }
 });
 
@@ -518,4 +534,3 @@ test("POST-TRANSFER DATA SAFETY GUARANTEE: PostgreSQL catalog tables contain the
   assert.ok(catCount >= 88, `category table must have at least 88 records, got ${catCount}`);
   assert.ok(prodCount >= 169, `product table must have at least 169 records, got ${prodCount}`);
 });
-

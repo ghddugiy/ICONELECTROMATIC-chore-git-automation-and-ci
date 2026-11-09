@@ -254,7 +254,7 @@ export function createEnquiriesRouter({
         return res.status(400).json({ success: false, message: errors[0] });
       }
 
-      const ip = req.socket?.remoteAddress || null;
+      const ip = req.ip ?? req.socket?.remoteAddress ?? null;
 
       // Persist before attempting email so we have a record even if email fails.
       const record = await prismaClient.enquiry.create({
@@ -411,7 +411,7 @@ export function createEnquiriesRouter({
         return res.status(400).json({ success: false, message: allErrors[0] });
       }
 
-      const ip = req.socket?.remoteAddress || null;
+      const ip = req.ip ?? req.socket?.remoteAddress ?? null;
       const resumeName = resumeFile.originalname;
       const resumeSizeKb = Math.ceil(resumeFile.size / 1024);
 

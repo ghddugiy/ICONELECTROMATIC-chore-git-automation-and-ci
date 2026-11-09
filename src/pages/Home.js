@@ -3,21 +3,47 @@
  * Sleek Cinematic Dark Aesthetic directly modeled after the Relay Framer reference
  * Fully connected to ContentService for dynamic text, cards, images, projects, gallery, and testimonials.
  */
-import { getPopularProducts } from '../data/catalogData.js';
+import { getPopularProducts } from '../../shared/catalogData.js';
 import { renderProductCard } from '../components/ProductCard.js';
+import { CatalogService } from '../data/CatalogService.js';
 import { ContentService } from '../data/ContentService.js';
+import { ApiService } from '../data/ApiService.js';
+
+let currentPopularProducts = getPopularProducts();
+let homeCatalogLoadId = 0;
+
+export async function loadHomePopularProducts(catalogService = CatalogService) {
+  const { catalog } = await catalogService.getPublicCatalog();
+  return getPopularProducts(catalog);
+}
+
+function filterPopularProducts(products, filter) {
+  if (filter === 'rogers') {
+    return products.filter(p => p.oemId === 'rogers-corporation');
+  }
+  if (filter === 'qorvo') {
+    return products.filter(p => p.oemId === 'qorvo');
+  }
+  if (filter === 'ohmega') {
+    return products.filter(p => p.oemId === 'ohmega-ticer');
+  }
+  if (filter === 'fortify') {
+    return products.filter(p => p.oemId === 'fortify');
+  }
+  if (filter === 'components') {
+    return products.filter(p => p.oemId === 'minicircuits' || p.oemId === 'rfuw-engineering' || p.oemId === 'triteq');
+  }
+  if (filter === 'sensors') {
+    return products.filter(p => p.oemId === 'thermosen' || p.oemId === 'nee' || p.oemId === 'transline-technology');
+  }
+  return products;
+}
 
 export function renderHomePage() {
-  const popular = getPopularProducts();
+  const popular = currentPopularProducts;
   const data = ContentService.getData('home');
   const contact = ContentService.getData('contact');
   const blogs = ContentService.getData('blogs');
-
-  const statsList = data.stats || [
-    { value: '4,000+', label: 'PRODUCTS AVAILABLE' },
-    { value: '24+', label: 'COMPONENT LINES' },
-    { value: '100%', label: 'ROHS & ISO 9001' }
-  ];
 
   const capList = data.capabilities || [
     { title: 'RF & Microwave Active', desc: 'High-linearity power amplifiers, ultra-low noise LNAs, active frequency mixers, and voltage-controlled oscillators.', linkText: 'Explore Amplifiers →', linkUrl: '/products?category=amplifiers', icon: 'fa-solid fa-wave-square' },
@@ -84,15 +110,6 @@ export function renderHomePage() {
             </a>
           </div>
 
-          <!-- Integrated Stats -->
-          <div class="hero-inline-stats" style="margin-top: 60px; padding-top: 30px; border-top: 1px solid rgba(255,255,255,0.2); display: flex; justify-content: space-between; align-items: center; max-width: 760px; gap: 20px;">
-            ${statsList.map(st => `
-              <div class="hero-stat-item" style="flex-direction: column; align-items: flex-start; gap: 4px;">
-                <span class="hero-stat-number" style="color: var(--logo-red);">${st.value}</span>
-                <span class="hero-stat-label" style="color: #cbd5e1;">${st.label}</span>
-              </div>
-            `).join('')}
-          </div>
         </div>
       </div>
     </section>
@@ -339,6 +356,33 @@ export function renderHomePage() {
 }
 
 export function initHomePage() {
+  const loadId = ++homeCatalogLoadId;
+  void loadHomePopularProducts()
+    .then((products) => {
+      if (loadId !== homeCatalogLoadId || products.length === 0) return;
+      currentPopularProducts = products;
+
+      const productsGrid = document.getElementById('home-products-grid');
+      if (!productsGrid) return;
+
+      const activeFilter =
+        document.querySelector('#home-category-tabs .filter-chip-dark.active')
+          ?.getAttribute('data-filter') || 'all';
+      productsGrid.innerHTML = filterPopularProducts(products, activeFilter)
+        .map((product, index) => renderProductCard(product, index))
+        .join('');
+      const allTab = document.querySelector(
+        '#home-category-tabs [data-filter="all"]'
+      );
+      if (allTab) allTab.textContent = `All Popular (${products.length})`;
+    })
+    .catch((error) => {
+      console.error(
+        'Failed to load live homepage products; retaining prerendered products.',
+        error
+      );
+    });
+
   // Ensure background video plays smoothly & muted
   const video = document.getElementById('hero-bg-video');
   if (video) {
@@ -369,22 +413,7 @@ export function initHomePage() {
         btn.classList.add('active');
 
         const filter = btn.getAttribute('data-filter') || 'all';
-        const allPopular = getPopularProducts();
-        
-        let filtered = allPopular;
-        if (filter === 'rogers') {
-          filtered = allPopular.filter(p => p.oemId === 'rogers-corporation');
-        } else if (filter === 'qorvo') {
-          filtered = allPopular.filter(p => p.oemId === 'qorvo');
-        } else if (filter === 'ohmega') {
-          filtered = allPopular.filter(p => p.oemId === 'ohmega-ticer');
-        } else if (filter === 'fortify') {
-          filtered = allPopular.filter(p => p.oemId === 'fortify');
-        } else if (filter === 'components') {
-          filtered = allPopular.filter(p => p.oemId === 'minicircuits' || p.oemId === 'rfuw-engineering' || p.oemId === 'triteq');
-        } else if (filter === 'sensors') {
-          filtered = allPopular.filter(p => p.oemId === 'thermosen' || p.oemId === 'nee' || p.oemId === 'transline-technology');
-        }
+        const filtered = filterPopularProducts(currentPopularProducts, filter);
 
         if (filtered.length === 0) {
           productsGrid.innerHTML = `
@@ -447,15 +476,9 @@ export function initHomePage() {
         .replace(/"/g, '&quot;');
 
       try {
-        const apiBase = (window.__ICON_API_BASE__ || '/api').replace(/\/+$/, '');
-        const res = await fetch(`${apiBase}/enquiries/contact`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        const data = await res.json().catch(() => ({}));
+        const data = await ApiService.post('/enquiries/contact', body);
 
-        if (res.ok && data.success) {
+        if (data.success) {
           // Backend returns { success: true, id: <uuid string> }
           // Display the raw id as the submission token; do not reformat it here.
           const refToken = data.id || '—';

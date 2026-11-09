@@ -1,4 +1,13 @@
-const API_BASE_URL = (import.meta?.env?.VITE_API_BASE_URL || '/api').replace(/\/+$/, '');
+const BUILD_API_BASE_URL = import.meta?.env?.VITE_API_BASE_URL || '';
+
+export function resolveApiBaseUrl(
+  runtimeBase = typeof window !== 'undefined' ? window.__ICON_API_BASE__ : '',
+  buildBase = BUILD_API_BASE_URL
+) {
+  return (runtimeBase || buildBase || '/api').replace(/\/+$/, '');
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 let csrfToken = null;
 

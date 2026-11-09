@@ -108,8 +108,10 @@ function makeApp({
   emailCareer = mockEmailOk,
   emailAcknowledgement = mockEmailOk,
   rateLimitMiddleware = null,
+  trustProxy = false,
 } = {}) {
   const app = express();
+  if (trustProxy) app.set("trust proxy", true);
   app.use(express.json());
 
   const rl = rateLimitMiddleware || ((req, res, next) => next());
@@ -309,6 +311,63 @@ test("POST /api/enquiries/contact — rate limit blocks after threshold", async 
       data.message.toLowerCase().includes("too many"),
       `Expected 'too many' in message: "${data.message}"`
     );
+  } finally {
+    server.close();
+  }
+});
+
+test("POST /api/enquiries/contact — rate limit keys requests by Express-resolved client IP", async () => {
+  const tightRl = createEnquiryRateLimit({ windowMs: 60_000, maxAttempts: 1 });
+  const { server, baseUrl } = await startServer(
+    makeApp({ rateLimitMiddleware: tightRl, trustProxy: true })
+  );
+  try {
+    const submit = (ip) =>
+      fetch(`${baseUrl}/contact`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": ip,
+        },
+        body: JSON.stringify(validContact),
+      });
+
+    assert.equal((await submit("198.51.100.10")).status, 201);
+    assert.equal((await submit("198.51.100.20")).status, 201);
+    assert.equal((await submit("198.51.100.10")).status, 429);
+  } finally {
+    server.close();
+  }
+});
+
+test("enquiries — contact and careers store Express-resolved client IPs", async () => {
+  const mockPrisma = makeMockPrisma();
+  const { server, baseUrl } = await startServer(
+    makeApp({ mockPrisma, trustProxy: true })
+  );
+  try {
+    const contactRes = await fetch(`${baseUrl}/contact`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Forwarded-For": "203.0.113.42",
+      },
+      body: JSON.stringify(validContact),
+    });
+    const careerRes = await fetch(`${baseUrl}/careers`, {
+      method: "POST",
+      headers: { "X-Forwarded-For": "203.0.113.42" },
+      body: buildCareerFormData(validCareerFields, {
+        filename: "resume.pdf",
+        mimetype: "application/pdf",
+        content: "%PDF-1.4 test resume",
+      }),
+    });
+
+    assert.equal(contactRes.status, 201);
+    assert.equal(careerRes.status, 201);
+    assert.equal([...mockPrisma._enquiries.values()][0].ip, "203.0.113.42");
+    assert.equal([...mockPrisma._careers.values()][0].ip, "203.0.113.42");
   } finally {
     server.close();
   }

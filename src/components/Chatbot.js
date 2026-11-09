@@ -3,9 +3,11 @@
  * Intelligent engineering dispatch chatbot with complete knowledge of all 15 OEMs,
  * their component categories, and flagship products.
  */
-import { CATALOG } from '../data/catalogData.js';
+import { CATALOG } from '../../shared/catalogData.js';
+import { CatalogService } from '../data/CatalogService.js';
 
 const BOT_NAME = 'ICON Engineering Assistant';
+let chatbotCatalog = CATALOG;
 
 // Helper to escape HTML
 function escapeHtml(str) {
@@ -22,7 +24,7 @@ function escapeHtml(str) {
 // Find matched OEM
 function findOem(query) {
   const q = query.toLowerCase();
-  for (const oem of CATALOG) {
+  for (const oem of chatbotCatalog) {
     if (q.includes(oem.name.toLowerCase()) || q.includes(oem.shortName.toLowerCase()) || q.includes(oem.id)) {
       return oem;
     }
@@ -44,7 +46,7 @@ function findOem(query) {
 // Find matched Category
 function findCategory(query) {
   const q = query.toLowerCase();
-  for (const oem of CATALOG) {
+  for (const oem of chatbotCatalog) {
     for (const cat of oem.categories) {
       if (cat.name && cat.name.length > 2 && q.includes(cat.name.toLowerCase())) {
         return { oem, cat };
@@ -69,7 +71,7 @@ function findCategory(query) {
 // Find matched Product
 function findProduct(query) {
   const q = query.toLowerCase();
-  for (const oem of CATALOG) {
+  for (const oem of chatbotCatalog) {
     for (const cat of oem.categories) {
       for (const prod of cat.products) {
         if (prod.name && prod.name.length > 3 && q.includes(prod.name.toLowerCase())) {
@@ -373,7 +375,25 @@ export function renderChatbot() {
   `;
 }
 
+export async function loadChatbotCatalog(
+  catalogService = CatalogService,
+  logError = console.error
+) {
+  try {
+    const result = await catalogService.getPublicCatalog();
+    if (Array.isArray(result.catalog) && result.catalog.length > 0) {
+      chatbotCatalog = result.catalog;
+    }
+    return chatbotCatalog;
+  } catch (error) {
+    logError('Failed to load the live chatbot catalog; retaining the available catalog.', error);
+    return chatbotCatalog;
+  }
+}
+
 export function initChatbot() {
+  void loadChatbotCatalog();
+
   const launcher = document.getElementById('chatbot-launcher-btn');
   const modal = document.getElementById('chatbot-modal');
   const closeBtn = document.getElementById('chatbot-close-btn');

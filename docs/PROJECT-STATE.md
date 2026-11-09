@@ -1,6 +1,6 @@
 # PROJECT-STATE.md - Icon Electromatic website
 
-Last updated: 2026-11-06
+Last updated: 2026-11-10
 Rule: update this file at the end of every task. Never write passwords, keys or tokens here.
 
 ## Goal
@@ -10,7 +10,9 @@ an indexable page with unique content, and that is handed over with documentatio
 client-owned accounts and one year of maintenance.
 
 ## Current stage
-Stage 3 - Backend and CMS (in progress)
+Phase 6 - Final handover corrections and verification. Production deployment
+and recovery operations remain client-owned and have not started; CSP
+enforcement remains deferred pending compatibility work and report-only testing.
 
 ## Stage checklist
 - [x] Frontend built (reviewed at commit e371aac, 15 Oct 2026)
@@ -23,9 +25,17 @@ Stage 3 - Backend and CMS (in progress)
 - [ ] Stage 6 - Security and safety nets
 - [x] Stage 7 - SEO for every product and the whole site (dynamic product-specific titles, meta descriptions, canonical tags, Open Graph, Twitter cards, Schema.org JSON-LD structured data, robots.txt, 169 prerendered HTML pages, and 176-URL sitemap.xml)
 - [ ] Stage 8 - Testing and launch
-- [ ] Stage 9 - Handover and maintenance
+- [x] Stage 9 - Client deployment handover documentation prepared; provider-specific configuration, production launch, and maintenance onboarding remain client decisions.
+- [x] Stage 10 - Enterprise handover package prepared: Nginx template, Prisma data dictionary, disaster recovery runbook, and linked updates to the client handover guides. Production Docker infrastructure was not added.
 
 ## Backend foundation
+- [x] Phase 1 follow-up fixes: enquiry rate limiting and both enquiry IP logs use Express-resolved IPs; the canonical catalogue now lives in `shared/catalogData.js`; Admin R2 upload failures restore the upload label and show an error without an IndexedDB fallback, while legacy `idb:` display remains supported. The CI job checks out the full repository before running from `backend/`, so `shared/` is present; no standalone backend packaging configuration exists to adjust. Local verification: production build generated 169 product pages and 176 sitemap URLs; F1/F3 tests and 19 database-independent catalogue transfer tests passed. The full backend run had 174 passes, 4 PostgreSQL-dependent failures (local DB unavailable), and 3 CI/R2 skips.
+- [x] Phase 2 security and database operations: login limiter cleanup/bounds regression test; explicit environment-based non-interactive admin provisioning; redacted fatal-process logging and graceful-shutdown escalation; guarded, read-only-by-default production catalogue seed command and operator runbook; chatbot and homepage now refresh from the public database catalogue while retaining static fallbacks. Verification: backend suite 190 passed, 0 failed, 3 R2-specific tests skipped in CI mode; frontend tests 4 passed; production build generated 169 product pages and 176 sitemap URLs. Production database and live R2 were not accessed.
+- [x] Phase 3 frontend reliability: Products, Blogs, About, product-card and RFQ navigation use clean routes while legacy hash-query URLs remain readable; Home and Contact use the shared API client with runtime override/build-time/default URL precedence; component rendering failures log and preserve the page shell with a recovery message; Home, About, Products, Blogs, and Contact now prerender as static HTML with unique metadata and one H1, without changing the product pages or 176-URL sitemap. `CmsDocument` remains in the Prisma schema and migration because safe removal requires a separate migration review; application-code searches found no usage. Verification: frontend tests 8 passed; production build passed; 169 product pages and 176 unique canonical sitemap URLs remain.
+- [x] Phase 4 handover preparation: the six existing deployment/service/audit/state guides now distinguish implemented behavior, client configuration, and future work; they cover the Node.js 22 runtime, static frontend and SPA behavior, API/sitemap proxy requirements, PostgreSQL/Prisma migration operations, guarded catalogue seeding, admin provisioning, backend-mediated R2, Resend DNS guidance, DNS/HTTPS, and an optional Nginx template. No client infrastructure was accessed or deployed. Vercel's backend origin and production hosting remain unconfigured pending client decisions.
+- [x] Phase 5 enterprise handover deliverables: created `docs/templates/nginx.conf.example`, `docs/DATA-DICTIONARY.md`, and `docs/DISASTER-RECOVERY-RUNBOOK.md`; linked them from the client, deployment, and R2 guides. The dictionary is checked against all 17 Prisma models, 10 enums, and five SQL migrations; the actual schema has 10 enums, correcting the plan's estimate of nine. The runbook marks production recovery actions as requiring client authorization and distinguishes the local Docker test database (`icon_electromatic_test`, port `5433`) from client production hosting. Production infrastructure, databases, credentials, email, R2, and deployment were not accessed.
+- [x] Phase 6 final handover corrections (2026-11-10): removed the specified unsupported homepage hero claims; documented CSP deferral, clarified trusted-proxy requirements, replaced developer-machine links in the audit, added the GitHub source handover guide, and documented live R2 test-bucket safeguards. Verification: frontend tests 8/8 passed; production build passed with 169 product pages and 176 unique sitemap URLs; specified claims were absent from Home.js, ContentService.js, and generated homepage HTML; changed-document local links passed; `git diff --check` passed. A safe backend run passed 186 tests, skipped 3, and had 4 PostgreSQL-dependent failures because database URLs were intentionally unset; no production database, email provider, or live R2 was contacted. CSP enforcement, production launch, and client-owned GitHub changes remain outstanding.
+- [ ] Outstanding schema review: `CmsDocument` appears unused by application code but remains in the Prisma schema and applied migration. Confirm database state and migration dependencies before considering removal.
 - [x] Phase 1 - Separate Express server, health endpoint, and backend dev/start scripts
 - [x] PostgreSQL connection to the existing `icon_electromatic` database tested
 - [x] Initial Prisma migration `20261017100248_init` recorded as applied
@@ -83,16 +93,17 @@ Stage 3 - Backend and CMS (in progress)
 - A managed headless CMS (for example Sanity) as the backend; Supabase with custom admin is the alternative
 - A small serverless function for enquiries (validation, spam protection, regional email routing, saved copy)
 
-## Known issues (as of 2026-10-29)
+## Known issues (reviewed 2026-11-10)
 - Web addresses use clean HTML5 history routing with build-time static HTML prerendering (`dist/product/:id/index.html`) and backward-compatible redirects from legacy `/#/product/:id` URLs. Search engine indexing requires post-deployment verification in Google Search Console.
 - Contact and careers forms now POST to real backend endpoints (`/api/enquiries/contact`, `/api/enquiries/careers`); email delivery requires `RESEND_API_KEY` and `CONTACT_EMAIL` to be configured in `backend/.env` — see `backend/.env.example` for setup steps
 - Demo admin: password is pre-filled in the page (to be cleared in Stage 1 cleanup); non-catalog edits are now persisted directly in PostgreSQL via SiteContent; Employee Zone link is public, admin code ships in the production bundle
 - Old fake product files (products.js, ProductDetail.js) are still in the repo
-- "4,000+ products" and "24+ categories" placeholder claims removed from index.html (still present in Home.js, ContentService.js and Admin.js pending Stage 1 cleanup)
+- Unsupported homepage hero statistics and certification claims were removed from the homepage rendering and default content. The Admin editor's example placeholder is not approved product or certification evidence and must not be used as a public claim.
+- The About-page default statistics in `src/data/ContentService.js` still include `1,500+` products, `150+` years of combined experience, and `15+` partners. These were outside the homepage correction and need client evidence review before they are treated as approved public claims.
 - Per-page titles, descriptions, canonical tags, sitemap, robots.txt and structured data implemented (Stage 7 completed)
-- Large files: 65 MB presentation, hero videos, main JS bundle about 645 KB
+- Large files: 65 MB presentation, hero videos, and main JavaScript bundle about 731 KB in the 2026-11-10 production build
 - Repo is public and contains client files
-- Two development-tool vulnerabilities (Vite, esbuild); affect the dev server only
+- A previous npm audit reported development-tool advisories involving Vite and esbuild; current advisory status has not been reverified
 
 ## Open questions
 1. Final product count: 169 in code, about 130 stated by the owner, 400+ claimed by the client
@@ -103,7 +114,7 @@ Stage 3 - Backend and CMS (in progress)
 
 ## Environments (names only, no secrets)
 - Production: not live yet
-- Hosting: Vercel (to confirm)
+- Hosting: client to confirm; Vercel is a possible static frontend host, but the backend origin and API rewrite are not configured.
 - Domain: owned by the client (registrar access to confirm)
 
 ## How to resume work
