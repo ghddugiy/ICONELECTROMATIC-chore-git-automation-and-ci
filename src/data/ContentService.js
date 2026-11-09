@@ -1,4 +1,4 @@
-import { CATALOG } from './catalogData.js';
+import { CATALOG } from '../../shared/catalogData.js';
 import { OEM_BLOGS } from './blogData.js';
 import { ImageStorage } from './ImageStorage.js';
 import { ApiService } from './ApiService.js';
@@ -51,11 +51,6 @@ const INITIAL_CONTENT = {
     ctaExploreLink: '/products',
     ctaQuoteText: 'Request a Quote',
     ctaQuoteLink: '/contact',
-    stats: [
-      { id: 'stat-1', value: '4,000+', label: 'PRODUCTS AVAILABLE' },
-      { id: 'stat-2', value: '24+', label: 'COMPONENT LINES' },
-      { id: 'stat-3', value: '100%', label: 'ROHS & ISO 9001' },
-    ],
     coreCapabilitiesTitle: 'Core Capabilities',
     coreCapabilitiesSubtitle: 'Engineered for extreme performance.',
     coreCapabilitiesLead: 'From millimeter-wave defense radar to satellite ground infrastructure, we provide the verified hardware engineers depend on.',

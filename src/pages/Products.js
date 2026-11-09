@@ -5,6 +5,7 @@
  */
 import { ContentService } from '../data/ContentService.js';
 import { CatalogService } from '../data/CatalogService.js';
+import { getRouteSearchParams } from '../router.js';
 
 let catalogData = null;
 let catalogNotice = '';
@@ -66,9 +67,7 @@ let navState = {
 };
 
 export function renderProductsPage() {
-  const hash = window.location.hash || '';
-  const queryStr = hash.includes('?') ? hash.split('?')[1] : '';
-  const params = new URLSearchParams(queryStr);
+  const params = getRouteSearchParams();
 
   navState.level = params.get('level') || 'oems';
   navState.oemId = params.get('oem') || null;
@@ -639,7 +638,7 @@ function renderProductCard(product, index, oem, cat) {
           <i class="fa-solid fa-microchip"></i>
           <span>View Specs</span>
         </a>
-        <a href="#/contact?subject=rfq&model=${encodeURIComponent(product.name)}&product=${encodeURIComponent(product.name)}&oem=${encodeURIComponent(oem.name)}" class="pcard-rfq-btn" style="background: ${oem.accentColor};">
+        <a href="/contact?subject=rfq&model=${encodeURIComponent(product.name)}&product=${encodeURIComponent(product.name)}&oem=${encodeURIComponent(oem.name)}" class="pcard-rfq-btn" style="background: ${oem.accentColor};">
           <span>Request RFQ</span>
         </a>
       </div>
@@ -696,7 +695,7 @@ function renderProductRow(product, index, oem) {
         <a href="/product/${encodeURIComponent(product.id)}" class="ptable-action-rfq" title="View Specifications" style="background:rgba(255,255,255,0.08);color:#e2e8f0;padding:6px 10px;">
           Specs
         </a>
-        <a href="#/contact?subject=rfq&model=${encodeURIComponent(product.name)}&product=${encodeURIComponent(product.name)}&oem=${encodeURIComponent(oem.name)}" class="ptable-action-rfq" title="Request Quote" style="background: ${oem.accentColor};padding:6px 10px;">
+        <a href="/contact?subject=rfq&model=${encodeURIComponent(product.name)}&product=${encodeURIComponent(product.name)}&oem=${encodeURIComponent(oem.name)}" class="ptable-action-rfq" title="Request Quote" style="background: ${oem.accentColor};padding:6px 10px;">
           RFQ
         </a>
       </div>
@@ -922,9 +921,7 @@ function navigateTo(paramsStr) {
   navState.oemId = params.get('oem') || null;
   navState.categoryId = params.get('category') || null;
 
-  // Update browser hash
-  const newHash = `#/products?${paramsStr}`;
-  history.replaceState(null, '', newHash);
+  history.replaceState(null, '', `/products?${paramsStr}`);
 
   // Transition content
   const content = document.getElementById('catalog-content');

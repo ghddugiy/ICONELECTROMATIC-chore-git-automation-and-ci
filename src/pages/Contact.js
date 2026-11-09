@@ -7,19 +7,11 @@
  */
 import { ContentService } from '../data/ContentService.js';
 import { ImageStorage } from '../data/ImageStorage.js';
+import { ApiService } from '../data/ApiService.js';
+import { getRouteSearchParams } from '../router.js';
 
 export function getInquiryDetails() {
-  const hash = window.location.hash || '';
-  const search = window.location.search || '';
-
-  let queryString = '';
-  if (hash.includes('?')) {
-    queryString = hash.slice(hash.indexOf('?') + 1);
-  } else if (search.includes('?')) {
-    queryString = search.slice(search.indexOf('?') + 1);
-  }
-
-  const p = new URLSearchParams(queryString);
+  const p = getRouteSearchParams();
   const productParam = (p.get('product') || p.get('model') || '').trim();
   const oemParam = (p.get('oem') || '').trim();
   const rawSubject = (p.get('subject') || '').toLowerCase().trim();
@@ -645,15 +637,9 @@ export function initContactPage() {
       };
 
       try {
-        const apiBase = (window.__ICON_API_BASE__ || '/api').replace(/\/+$/, '');
-        const res = await fetch(`${apiBase}/enquiries/contact`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        const data = await res.json().catch(() => ({}));
+        const data = await ApiService.post('/enquiries/contact', body);
 
-        if (res.ok && data.success) {
+        if (data.success) {
           // Show existing success panel
           const name = body.fullname || 'Customer';
           if (inquiryPanel) {
@@ -744,14 +730,9 @@ export function initContactPage() {
           formData.append('resume', resumeInput.files[0]);
         }
 
-        const apiBase = (window.__ICON_API_BASE__ || '/api').replace(/\/+$/, '');
-        const res = await fetch(`${apiBase}/enquiries/careers`, {
-          method: 'POST',
-          body: formData, // browser sets multipart Content-Type automatically
-        });
-        const data = await res.json().catch(() => ({}));
+        const data = await ApiService.post('/enquiries/careers', formData);
 
-        if (res.ok && data.success) {
+        if (data.success) {
           const candName = document.getElementById('r-fullname')?.value || 'Candidate';
           const position = document.getElementById('r-position')?.value || 'Engineering Role';
           const candRefId = data.id || ('ICON-CAREER-' + Math.floor(100000 + Math.random() * 900000));

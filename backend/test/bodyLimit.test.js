@@ -13,7 +13,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import express from "express";
-import { CATALOG } from "../../src/data/catalogData.js";
+import { CATALOG } from "../../shared/catalogData.js";
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Minimal Express app that mirrors the production body-parser and error handler

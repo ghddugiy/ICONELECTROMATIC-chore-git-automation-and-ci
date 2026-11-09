@@ -18,10 +18,11 @@ import { renderAdminPage, initAdminPage } from './admin/Admin.js';
 import { ImageStorage } from './data/ImageStorage.js';
 import { SeoService } from './data/SeoService.js';
 import { ContentService } from './data/ContentService.js';
+import { renderSafely } from './rendering.js';
 
 const app = document.getElementById('app');
 
-function renderPage(content, initFn) {
+function renderPage(renderContent, initFn) {
   const currentPath = getCurrentPath();
   let header = document.getElementById('site-header');
 
@@ -32,9 +33,17 @@ function renderPage(content, initFn) {
     document.body.insertBefore(header, app);
   }
   header.style.display = 'block';
-  header.innerHTML = renderHeaderInner(currentPath);
-  initHeader();
-  updateDrawerActiveState(currentPath);
+  header.innerHTML = renderSafely(
+    () => renderHeaderInner(currentPath),
+    '',
+    'site header'
+  );
+  renderSafely(initHeader, undefined, 'site header behavior');
+  renderSafely(
+    () => updateDrawerActiveState(currentPath),
+    undefined,
+    'navigation state'
+  );
 
   // Always close mobile navigation drawer and sidebar drawer when a route loads
   const mainNav = document.getElementById('main-nav');
@@ -44,17 +53,34 @@ function renderPage(content, initFn) {
     mobileToggle.classList.remove('active');
     mobileToggle.setAttribute('aria-expanded', 'false');
   }
-  closeSidebarDrawer();
+  renderSafely(closeSidebarDrawer, undefined, 'navigation drawer');
 
   if (!currentPath.startsWith('/product/')) {
-    SeoService.setDefaultSeo(currentPath);
+    renderSafely(
+      () => SeoService.setDefaultSeo(currentPath),
+      undefined,
+      'page metadata'
+    );
   }
 
-  app.innerHTML = content + renderFooter() + renderBackToTop() + renderChatbot();
-  initChatbot();
-  if (initFn) initFn();
-  initBackToTop();
-  window.scrollTo({ top: 0 });
+  const content = renderSafely(
+    renderContent,
+    `<main class="page-content render-error" role="alert">
+      <div class="container">
+        <h1>This page could not be displayed</h1>
+        <p>Please try again or return to the <a href="/" data-route="/">home page</a>.</p>
+        <button type="button" onclick="window.location.reload()">Reload this page</button>
+      </div>
+    </main>`,
+    `page ${currentPath}`
+  );
+  const footer = renderSafely(renderFooter, '', 'site footer');
+  const chatbot = renderSafely(renderChatbot, '', 'chatbot');
+  app.innerHTML = content + footer + renderBackToTop() + chatbot;
+  renderSafely(initChatbot, undefined, 'chatbot behavior');
+  if (initFn) renderSafely(initFn, undefined, 'page behavior');
+  renderSafely(initBackToTop, undefined, 'back-to-top behavior');
+  renderSafely(() => window.scrollTo({ top: 0 }), undefined, 'page scrolling');
 }
 
 function renderBackToTop() {
@@ -70,15 +96,15 @@ function initBackToTop() {
   btn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
 }
 
-registerRoute('/', () => renderPage(renderHomePage(), initHomePage));
-registerRoute('/products', () => renderPage(renderProductsPage(), initProductsPage));
-registerRoute('/product/:id', (params) => renderPage(renderProductDetailPage(params), () => initProductDetailPage(params)));
-registerRoute('/about', () => renderPage(renderAboutPage(), initAboutPage));
-registerRoute('/services', () => renderPage(renderServicesPage(), initServicesPage));
-registerRoute('/partners', () => renderPage(renderPartnersPage(), initPartnersPage));
-registerRoute('/blogs', (params) => renderPage(renderBlogsPage(params), () => initBlogsPage(params)));
-registerRoute('/blog', (params) => renderPage(renderBlogsPage(params), () => initBlogsPage(params)));
-registerRoute('/contact', () => renderPage(renderContactPage(), initContactPage));
+registerRoute('/', () => renderPage(renderHomePage, initHomePage));
+registerRoute('/products', () => renderPage(renderProductsPage, initProductsPage));
+registerRoute('/product/:id', (params) => renderPage(() => renderProductDetailPage(params), () => initProductDetailPage(params)));
+registerRoute('/about', () => renderPage(renderAboutPage, initAboutPage));
+registerRoute('/services', () => renderPage(renderServicesPage, initServicesPage));
+registerRoute('/partners', () => renderPage(renderPartnersPage, initPartnersPage));
+registerRoute('/blogs', (params) => renderPage(() => renderBlogsPage(params), () => initBlogsPage(params)));
+registerRoute('/blog', (params) => renderPage(() => renderBlogsPage(params), () => initBlogsPage(params)));
+registerRoute('/contact', () => renderPage(renderContactPage, initContactPage));
 registerRoute('/admin', () => {
   closeSidebarDrawer();
   const header = document.getElementById('site-header');

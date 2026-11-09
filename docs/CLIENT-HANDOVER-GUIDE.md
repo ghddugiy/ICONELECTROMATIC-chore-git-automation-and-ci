@@ -1,14 +1,25 @@
-# Client Handover & Operations Guide
+# Client Deployment Handover & Operations Guide
 
 **Project:** ICON Electromatic B2B Catalog & CMS Website
 **Date:** November 2026
 **Audience:** Client Technical Team, System Administrators, and Sales Operations
 
+The client owns and performs production deployment. This guide describes the
+implemented application and the configuration the client must supply. Production
+hosting, domains, credentials, and infrastructure have not been provisioned or
+verified by the development team.
+
+For transfer of repository ownership, collaborator access, branch rules, and CI
+responsibilities, see the [GitHub Source Handover Guide](./GITHUB-SOURCE-HANDOVER-GUIDE.md).
+
 ---
 
 ## 1. Project Overview & Capabilities
 
-This website is a production-ready, SEO-optimized B2B catalog platform built for **Icon Electromatic**, an authorized distributor of RF, microwave, and electronic components from OEM principals (including Rogers Corporation, Mini-Circuits, Qorvo, and others).
+The repository implements an SEO-oriented B2B catalog platform for **Icon
+Electromatic**, an authorized distributor of RF, microwave, and electronic
+components. Production hosting and deployment have not yet been provisioned or
+verified; client configuration and launch checks remain outstanding.
 
 ### Key Systems Delivered:
 1. **Public B2B Product Catalog:**
@@ -34,9 +45,12 @@ This website is a production-ready, SEO-optimized B2B catalog platform built for
 
 ---
 
-## 2. Architecture & Reverse Proxy Requirement
+## 2. Architecture & Hosting Requirements
 
-To deliver robust security, the frontend and backend are designed to run under a **single-origin reverse proxy**:
+Recommended topology: host the static frontend on a static-site platform such as
+Vercel, host the Express API on a managed Node.js service, and use managed
+PostgreSQL and Cloudflare R2. The client chooses providers and regions. Production
+Docker infrastructure is not required.
 
 ```
 [ Client Browser / Administrator ]
@@ -45,22 +59,55 @@ To deliver robust security, the frontend and backend are designed to run under a
    https://iconelectromatic.com
                │
       ┌────────┴────────────────────────┐
-      │  Reverse Proxy / CDN            │
-      │  (e.g., Cloudflare / Vercel)    │
+      │  Static host / CDN / proxy      │
       └────────┬────────────────────────┘
                │
       ┌────────┴─────────────────────────────────┐
       │ Routes:                                  │
       │   /api/*          ──▶  Express API Server│
-      │   /sitemap.xml    ──▶  Dynamic Sitemap   │
+      │   /sitemap.xml    ──▶  Backend sitemap  │
       │   /* (Static)     ──▶  Frontend Static   │
       └──────────────────────────────────────────┘
 ```
 
-### Why Same-Origin `/api` Reverse Proxy is Required:
+### Frontend hosting
+
+- Build from the repository root with Node.js 22, `npm ci`, then `npm run build`.
+- Publish the generated `dist/` directory. The build prerenders product pages and
+  the Home, About, Products, Blogs, and Contact pages.
+- Configure the host to serve existing files/directories before applying the SPA
+  fallback to `/index.html`.
+- Set `VITE_SITE_ORIGIN` to the client's final HTTPS canonical site origin at
+  build time. For same-origin proxying, keep `VITE_API_BASE_URL` as `/api`.
+  The optional runtime `window.__ICON_API_BASE__` override takes precedence.
+
+### Backend hosting
+
+- Deploy with the complete repository checkout/build context, including `shared/`;
+  the backend is not a standalone package.
+- Use Node.js 22 and install backend dependencies from `backend/` with `npm ci`.
+- Configure backend variables through the hosting provider's secret/config store.
+  Start from `backend/` with `npm start` (equivalent to `node src/server.js`).
+- Let the platform provide `PORT` where applicable. Keep the service behind the
+  frontend reverse proxy where supported.
+
+### Why same-origin `/api` reverse proxy is required
 * **Session Cookie Hardening:** In production mode (`NODE_ENV=production`), admin authentication uses `__Host-` prefixed cookies (`__Host-admin_session` and `__Host-admin_csrf`). Browsers only store and transmit `__Host-` cookies when sent from the exact same origin over secure HTTPS with no domain attribute.
 * **CORS Elimination:** Requests to `/api` are same-origin, eliminating complex cross-origin preflight requests.
 * **Double-Submit CSRF Defense:** Modifying requests (`POST`, `PUT`, `PATCH`, `DELETE`) require both the secure CSRF cookie and an `X-CSRF-Token` header.
+
+The current [vercel.json](../vercel.json) builds the static site, routes
+`/sitemap.xml` to same-origin `/api/sitemap.xml`, and sends other unmatched paths
+to `/index.html`. It does **not** contain a backend API origin or route `/api/*`
+to a separately hosted service. Once the client chooses a backend provider, add
+an explicit `/api/*` rewrite to that service and route the sitemap request to the
+backend. Do not deploy the current configuration as though it already connects
+the API. The backend origin is intentionally not invented here.
+
+For self-managed hosting, an optional Nginx template is in
+[Nginx template](./templates/nginx.conf.example), with
+replacement and security notes in
+[PRODUCTION-DEPLOYMENT-GUIDE.md](./PRODUCTION-DEPLOYMENT-GUIDE.md).
 
 ---
 
@@ -73,27 +120,62 @@ All environment variables must be configured directly in your hosting platform d
 | Variable Name | Required | Example / Placeholder | Client Responsibility / Description |
 |---|---|---|---|
 | `NODE_ENV` | **Yes** | `production` | Enables production security (enforces `__Host-` cookies, strict CORS, and disables localhost). |
-| `PORT` | **Yes** | `5000` | Port on which the Express server listens. |
+| `PORT` | Hosting-dependent | Provider-assigned port (application default: `5000`) | Port on which the Express server listens. |
 | `FRONTEND_URL` | **Yes** | `https://iconelectromatic.com,https://www.iconelectromatic.com` | Comma-separated list of allowed frontend web origins. |
-| `TRUST_PROXY` | **Yes** | `1` | Reverse proxy hops (set to `1` behind Cloudflare, Vercel, Railway, Render, or AWS ALB). |
+| `TRUST_PROXY` | Hosting-dependent | Match the verified trusted proxy chain | Enables Express to resolve client IPs behind a proxy. Configure only when backend access is restricted to that proxy and it sanitizes or overwrites client-supplied forwarding headers. Never trust arbitrary forwarded headers or copy a generic hop count. |
 | `SITE_ORIGIN` | **Yes** | `https://iconelectromatic.com` | Canonical public origin used for dynamic `/sitemap.xml` and prerender generation. |
 | `DATABASE_URL` | **Yes** | `postgresql://USER:PASSWORD@HOST:5432/DB?schema=public` | Connection URL for your production PostgreSQL 14+ database. Use `sslmode=require` for cloud databases. |
-| `RESEND_API_KEY` | **Yes** | `re_123456789_abcdefghijklmnopqrstuv` | API key from your Resend account with "Sending access". |
-| `RESEND_FROM_EMAIL` | **Yes** | `notifications@iconelectromatic.com` | Sender address on your verified domain in Resend. |
-| `CONTACT_EMAIL` | **Yes** | `sales@iconelectromatic.com` | Primary fallback recipient inbox for enquiries and career applications. |
-| `R2_ACCOUNT_ID` | **Yes** | `32-character hex account id` | Cloudflare R2 Account ID. |
-| `R2_ACCESS_KEY_ID` | **Yes** | `32-character key` | S3 API Access Key ID generated in Cloudflare R2. |
-| `R2_SECRET_ACCESS_KEY` | **Yes** | `64-character secret` | S3 API Secret Access Key generated in Cloudflare R2. |
-| `R2_BUCKET_NAME` | **Yes** | `icon-electromatic-media` | Private bucket name in Cloudflare R2. |
+| `RESEND_API_KEY` | Required for live email | Secret from provider | Resend sending API key; keep in the backend secret store. |
+| `RESEND_FROM_EMAIL` | Required for live email | Sender on verified domain | Preferred sender setting. `ENQUIRY_FROM` is a legacy fallback only. |
+| `CONTACT_EMAIL` | Required for live email | Client-approved fallback inbox | Receives general enquiries and career applications; regional enquiries use fixed server-side addresses. |
+| `R2_ACCOUNT_ID` | Optional in app config | Cloudflare account identifier | The application uses the configured S3 endpoint and credentials directly. |
+| `R2_ACCESS_KEY_ID` | Required for R2 | Secret from provider | Bucket-scoped R2 S3 API key ID. |
+| `R2_SECRET_ACCESS_KEY` | Required for R2 | Secret from provider | Bucket-scoped R2 S3 API secret. |
+| `R2_BUCKET_NAME` | Required for R2 | Client-selected bucket | Target bucket name. |
 | `R2_ENDPOINT` | **Yes** | `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` | S3 API endpoint URL for your Cloudflare R2 account. |
-| `R2_PUBLIC_DOMAIN` | Optional | `https://media.iconelectromatic.com` | Optional public CDN custom domain connected to the R2 bucket. |
+| `R2_PUBLIC_DOMAIN` | Optional | Client-configured HTTPS domain | If set, media delivery redirects to this host, which must serve uploaded object keys. Otherwise the backend streams from the private bucket or uses a short-lived signed URL fallback. |
+
+`ADMIN_EMAIL` and `ADMIN_PASSWORD` are needed only for non-interactive first-admin
+provisioning. `PRODUCTION_DATABASE_URL` is used only by the optional production
+catalogue seeder. Supply these temporarily through a secret manager and remove
+them after the operation.
 
 ### Frontend Environment Variables (`.env`)
 
 | Variable Name | Required | Example / Placeholder | Description |
 |---|---|---|---|
-| `VITE_API_URL` | Optional | `/api` | Base path for API requests. In same-origin reverse-proxy setups, leave as `/api` or empty. |
+| `VITE_API_BASE_URL` | Optional | `/api` | Build-time base path for API requests. A runtime `window.__ICON_API_BASE__` override takes precedence; otherwise, same-origin reverse-proxy setups use `/api`. |
 | `VITE_SITE_ORIGIN` | Optional | `https://iconelectromatic.com` | Canonical site origin for static prerendered HTML links and social sharing tags. |
+
+`SITE_ORIGIN` is the backend's canonical sitemap origin. The root
+`.env.example` also lists it for build environments; use the client's canonical
+HTTPS site origin when configuring the frontend build and backend service.
+
+### Implementation status
+
+**Implemented in the repository:** static product and core-page prerendering;
+SPA fallback behavior; backend API and dynamic sitemap routes; Prisma migrations;
+guarded read-only-by-default catalogue seeding; interactive and secret-store
+admin provisioning; backend-mediated R2 upload and delivery; Resend-based email
+dispatch with server-side regional routing.
+
+**Client configuration and launch tasks:** choose frontend/backend/PostgreSQL
+providers and regions; set production environment variables; configure same-origin
+API and sitemap routing; apply migrations after target and backup verification;
+provision the first administrator; select and authorize initial catalogue
+population; configure R2, Resend, regional inboxes, DNS, and HTTPS; run the
+verification checklist below.
+
+**Future or unresolved items:** client-specific host/rewrite values cannot be
+filled in before hosting is selected; R2 bulk migration and retired-object
+cleanup are not implemented; `CmsDocument` remains pending a separate schema and
+migration review. See [PROJECT-STATE.md](./PROJECT-STATE.md) and
+[IMAGE-STORAGE-R2-INTEGRATION.md](./IMAGE-STORAGE-R2-INTEGRATION.md).
+
+For the complete Prisma entity/field reference, see
+[DATA-DICTIONARY.md](./DATA-DICTIONARY.md). For client-authorized backup,
+restore, migration recovery, and incident procedures, see
+[DISASTER-RECOVERY-RUNBOOK.md](./DISASTER-RECOVERY-RUNBOOK.md).
 
 ---
 
@@ -126,10 +208,12 @@ The website uses Resend for transactional customer notifications and internal sa
 1. **Sign Up & Add Domain:**
    Log in to [Resend](https://resend.com) and add your corporate domain: `iconelectromatic.com`.
 2. **DNS Verification:**
-   Add the DNS records generated by Resend to your domain registrar / DNS provider:
-   * **SPF:** TXT record authorizing Resend servers.
-   * **DKIM:** CNAME / TXT records for cryptographic email signing.
-   * **DMARC:** TXT record for domain spoof protection.
+   In your own Resend account, open the domain setup page and copy the exact DNS
+   records and names it provides for the selected sending region. Add those
+   records at the authoritative DNS provider. Do not assume a fixed number or
+   type of records; requirements can vary. Coordinate SPF and DMARC with the
+   client's existing mail administrator, and do not replace existing mail
+   records blindly.
 3. **Verification Check:**
    Confirm in Resend that the domain status is **Verified**. Emails sent from an unverified domain in production mode will be blocked.
 4. **Sender Configuration:**
@@ -147,12 +231,24 @@ Cloudflare R2 provides zero-egress S3-compatible storage for product images and 
    Under **Manage R2 API Tokens**, click **Create API Token** with **Object Read & Write** permissions scoped to your media bucket.
 3. **Environment Setup:**
    Copy the Access Key ID, Secret Access Key, and S3 Endpoint into the backend environment variables.
-4. **Secure Image Delivery:**
-   The backend provides cached binary streaming via `GET /api/media/file/:id` with cross-origin headers (`CORP: cross-origin`), allowing product images to render without exposing bucket credentials.
+4. **Implemented upload and delivery:**
+   The Admin CMS sends uploads to authenticated backend
+   `POST /api/media/upload`. The backend validates image bytes and size, writes
+   the object to R2, then records the media asset in PostgreSQL. Public delivery
+   uses `GET /api/media/file/:id`; by default the backend streams from the private
+   bucket, with a signed-URL fallback. If `R2_PUBLIC_DOMAIN` is configured, the
+   route redirects to that host instead. Browser-to-R2 uploads and bucket CORS
+   are not part of this implemented upload flow.
 
 ---
 
 ## 7. Database Migration & Provisioning Runbook
+
+The existing local Docker PostgreSQL container and database
+`icon_electromatic_test` on port `5433` are for development/testing only. They
+are not production infrastructure. The client should use a selected managed
+PostgreSQL service unless its chosen hosting design has a documented reason to
+self-host a database. No production Dockerfile or Compose stack is included.
 
 When deploying to your production infrastructure, run the following steps in sequence:
 
@@ -172,7 +268,11 @@ Prisma migrations create all tables, enums, indexes, and relations automatically
 cd backend
 npm run migrate
 ```
-*(This executes `prisma migrate deploy`, safely applying migrations up through `20261106000000_add_enquiry_workflow_and_communications` without resetting existing data.)*
+This runs Prisma `migrate deploy` from the backend package, applying pending
+checked-in migrations without resetting the database. Confirm the provider's
+PostgreSQL compatibility, backup/restore procedure, TLS settings, and the exact
+target before running it. Do not run development-only migration-reset commands
+against production.
 
 ### Step 3: Provision the First Administrator Account
 Create your first active system administrator interactively:
@@ -184,7 +284,17 @@ node scripts/provision-admin.js
 * **Password:** Enter a secure password (minimum 14 characters, hidden input).
 * **Confirm:** Re-enter the password.
 
-The script hashes the password with cryptographic salt and creates an active administrator with role `ADMIN`.
+The script hashes the password with a cryptographic salt and creates an active administrator with role `ADMIN`.
+
+For deployment automation, provision with `--non-interactive` and pass `ADMIN_EMAIL` and `ADMIN_PASSWORD` through the platform's secret environment-variable store. Do not put the password in command-line arguments, logs, or shell history:
+```bash
+cd backend
+node scripts/provision-admin.js --non-interactive
+```
+Non-interactive mode requires `ADMIN_EMAIL` and `ADMIN_PASSWORD` in the
+provider's secret store. Do not pass passwords as command-line arguments, print
+them, or place them in shell history. Remove temporary provisioning secrets
+after setup.
 
 ### Step 4: Initial Catalog Transfer to PostgreSQL
 1. Start the server and visit `/admin` in your browser.
@@ -192,6 +302,22 @@ The script hashes the password with cryptographic salt and creates an active adm
 3. Go to the **Catalog** tab.
 4. A notice will indicate that PostgreSQL has 0 catalog records. Click **Execute Transfer to PostgreSQL**.
 5. The system will perform an automatic pre-execution dry-run audit, then atomically populate all **15 OEM principals**, **88 product categories**, and **169 authentic products** into PostgreSQL.
+
+#### Optional production seed command
+
+The Admin CMS transfer above is preferred. Use the dedicated production seed command only when the client explicitly chooses a baseline import and an authorized operator has confirmed the target. It does not delete or replace catalog records: it seeds only a clean, empty catalog, returns without changes for an already consistent baseline, and stops on partial, conflicting, or inconsistent data.
+
+1. Arrange a verified database backup and obtain the production connection URL from the client's hosting provider. Provide it only as `PRODUCTION_DATABASE_URL` through a secure environment-variable or secret manager. The catalogue seeder requires `sslmode=verify-full`, which verifies both the TLS certificate chain and server hostname; it rejects `require` and `verify-ca`.
+2. Run a read-only inspection first:
+   ```bash
+   cd backend
+   npm run seed:production-catalog
+   ```
+3. If and only if the inspection confirms the intended production host and an empty catalog, run the apply command. Replace the placeholders using the exact host, port, and database name from the authorized connection URL:
+   ```bash
+   npm run seed:production-catalog -- --apply --confirm-production-seed="PRODUCTION_HOST:PRODUCTION_PORT/PRODUCTION_DATABASE"
+   ```
+4. Review the reported target and resulting status. Never use a test URL, paste credentials into the confirmation argument, or run the apply command without an approved backup and client authorization.
 
 ---
 
@@ -211,7 +337,8 @@ npm run build
 cd backend
 npm start
 ```
-* Launches the production Express server (`src/server.js`) on the configured `PORT`.
+* Starts `src/server.js` using the provider-assigned `PORT`, or the application's
+  default port when the provider does not set one.
 
 ---
 
@@ -283,7 +410,17 @@ Before directing public DNS traffic to the live production server:
 - [ ] Three regional sales mailboxes (`salesiepl@...`, `IESing@...`, `salesiellc@...`) verified active on corporate email server.
 - [ ] Cloudflare R2 bucket `icon-electromatic-media` created and API credentials configured.
 - [ ] Reverse proxy configured to route `/api/*` and `/sitemap.xml` to the backend.
+- [ ] Static host serves prerendered files before SPA fallback and has the final canonical site origin configured at build time.
+- [ ] Backend runs on Node.js 22, has the full repository context (including `shared/`), and has its health check configured.
+- [ ] API and sitemap rewrites point to the client-selected backend origin; `/api/*` does not fall through to the SPA HTML.
 - [ ] `NODE_ENV=production` set in backend hosting dashboard.
+- [ ] DNS points to the chosen frontend host, HTTPS is active, and all public pages and API paths use HTTPS.
+- [ ] Backend access is restricted to the verified proxy; that proxy sanitizes or overwrites forwarded headers; `TRUST_PROXY` matches only that verified chain. If unverified, leave proxy trust disabled.
+- [ ] Database backup and restore are confirmed before migrations or catalogue seeding.
+- [ ] Client confirms whether to use the Admin CMS transfer or guarded baseline seed for initial catalogue population.
 - [ ] All automated tests pass (`node --test`).
 - [ ] Frontend built and prerendered via `npm run build`.
 - [ ] Manual browser check of `/admin` login, enquiry timeline, and CSV downloads completed.
+- [ ] Backup and restore process documented and restore tested in an isolated recovery database.
+- [ ] Database model reference reviewed: [DATA-DICTIONARY.md](./DATA-DICTIONARY.md).
+- [ ] Recovery and incident procedures reviewed: [DISASTER-RECOVERY-RUNBOOK.md](./DISASTER-RECOVERY-RUNBOOK.md).

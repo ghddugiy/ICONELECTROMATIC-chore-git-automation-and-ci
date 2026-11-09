@@ -12,7 +12,7 @@ if (typeof globalThis.localStorage === 'undefined') {
   };
 }
 
-import { CATALOG } from '../../src/data/catalogData.js';
+import { CATALOG } from '../../shared/catalogData.js';
 import { CatalogService } from '../../src/data/CatalogService.js';
 import {
   SeoService,
@@ -509,4 +509,3 @@ test('DYNAMIC SITEMAP: Falls back gracefully to static fallback when database qu
     }
   }
 });
-

@@ -1,9 +1,10 @@
 import './admin.css';
 import { ContentService } from '../data/ContentService.js';
 import { ImageStorage } from '../data/ImageStorage.js';
-import { CATALOG } from '../data/catalogData.js';
+import { CATALOG } from '../../shared/catalogData.js';
 import { ApiService } from '../data/ApiService.js';
 import { CatalogService } from '../data/CatalogService.js';
+import { handleUploadError } from './uploadError.js';
 
 // ─── State ─────────────────────────────────────────────────────────────────
 let isAuthenticated = false;
@@ -445,41 +446,12 @@ function bindImageWidgets(container = document) {
         if (uploadTxt) uploadTxt.textContent = 'Replace Image';
         showToast('Image uploaded and stored in Cloudflare R2!', 'success');
       } catch (err) {
-        console.error('Cloudflare R2 upload failed:', err);
-        if (uploadTxt) uploadTxt.textContent = prevTxt;
-        showToast(`R2 upload failed: ${err.message}`, 'error');
-
-        // Explicit fallback confirmation: never silently fall back
-        const fallback = confirm(
-          `Cloudflare R2 upload failed: ${err.message}\n\nWould you like to save this image locally in your browser storage (IndexedDB) instead?`
-        );
-        if (fallback) {
-          try {
-            showToast('Saving image locally in IndexedDB...', '');
-            const imgId = await ImageStorage.saveImage(file);
-            const resolvedUrl = ImageStorage.resolveImageUrl(imgId);
-
-            const hiddenInput = container.querySelector(`#hidden-${fieldName}`) || container.querySelector(`input[name="${fieldName}"]`);
-            if (hiddenInput) hiddenInput.value = imgId;
-
-            const urlInput = container.querySelector(`.a-img-url-input[data-target="${fieldName}"]`);
-            if (urlInput) urlInput.value = imgId;
-
-            const thumbBox = container.querySelector(`#thumb-box-${fieldName}`) || container.querySelector(`.a-image-widget[data-field="${fieldName}"] .a-img-thumb-box`);
-            if (thumbBox) {
-              thumbBox.innerHTML = `<img src="${resolvedUrl}" class="a-thumb-img" alt="Preview" />`;
-            }
-
-            const delBtn = container.querySelector(`#del-btn-${fieldName}`) || container.querySelector(`.a-img-delete-btn[data-target="${fieldName}"]`);
-            if (delBtn) delBtn.style.display = 'inline-flex';
-
-            if (uploadTxt) uploadTxt.textContent = 'Replace Image';
-            showToast('Saved locally in browser IndexedDB (not uploaded to R2)', 'success');
-          } catch (localErr) {
-            console.error('Local image storage failed:', localErr);
-            alert(`Failed to save image: ${localErr.message}`);
-          }
-        }
+        handleUploadError({
+          error: err,
+          uploadTxt,
+          previousLabel: prevTxt,
+          showToast,
+        });
       } finally {
         input.value = '';
       }

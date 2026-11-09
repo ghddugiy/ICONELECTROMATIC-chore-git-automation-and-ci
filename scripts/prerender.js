@@ -6,7 +6,8 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { CATALOG } from '../src/data/catalogData.js';
+import { createServer } from 'vite';
+import { CATALOG } from '../shared/catalogData.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,6 +15,38 @@ const ROOT_DIR = path.resolve(__dirname, '..');
 const DIST_DIR = path.resolve(ROOT_DIR, 'dist');
 const BASE_ORIGIN = process.env.VITE_SITE_ORIGIN || process.env.SITE_ORIGIN || 'https://iconelectromatic.com';
 const SITE_NAME = 'ICON ELECTROMATIC';
+const CORE_PAGE_MODULES = [
+  {
+    route: '/',
+    title: 'RF, Microwave & Electronic Components',
+    description: 'Icon Electromatic is an authorized distributor of RF, Microwave, and electromechanical components for defense, aerospace, SATCOM, and telecommunications.',
+    render: 'renderHomePage',
+  },
+  {
+    route: '/about',
+    title: 'About Us — 28+ Years of RF Excellence',
+    description: 'Discover Icon Electromatic’s history, core milestones, and certified distribution of microwave, millimetre-wave, and RF electronic hardware.',
+    render: 'renderAboutPage',
+  },
+  {
+    route: '/products',
+    title: 'Product Portfolio & Component Catalog',
+    description: 'Browse authorized OEM RF and microwave components across leading manufacturers: Rogers Corporation, Mini-Circuits, Qorvo, TecDia, and more.',
+    render: 'renderProductsPage',
+  },
+  {
+    route: '/blogs',
+    title: 'Technical News, Video Demos & Whitepapers',
+    description: 'Read official application notes, technical webinars, whitepapers, and product bulletins direct from our authorized OEM principals.',
+    render: 'renderBlogsPage',
+  },
+  {
+    route: '/contact',
+    title: 'Contact Us — Request Quote & Technical Inquiry',
+    description: 'Get in touch with Icon Electromatic engineers across our offices in India, Singapore, and USA for formal quotes and technical assistance.',
+    render: 'renderContactPage',
+  },
+];
 
 function escapeHtml(str) {
   if (!str) return '';
@@ -31,6 +64,138 @@ function sanitizeText(str) {
     .replace(/<[^>]*>/g, '')
     .replace(/[\r\n\t]+/g, ' ')
     .trim();
+}
+
+function replaceCorePageMetadata(pageHtml, page) {
+  const canonicalUrl = `${BASE_ORIGIN}${page.route === '/' ? '/' : page.route}`;
+  const title = `${page.title} | ${SITE_NAME}`;
+  pageHtml = pageHtml.replace(/<title>.*?<\/title>/i, `<title>${escapeHtml(title)}</title>`);
+  pageHtml = pageHtml.replace(
+    /<meta\s+name="description"\s+content=".*?"\s*\/?>/i,
+    `<meta name="description" content="${escapeHtml(page.description)}" />`
+  );
+  pageHtml = pageHtml.replace(
+    /<link\s+rel="canonical"\s+href=".*?"\s*\/?>/i,
+    `<link rel="canonical" href="${escapeHtml(canonicalUrl)}" />`
+  );
+  pageHtml = pageHtml.replace(
+    /<meta\s+property="og:title"\s+content=".*?"\s*\/?>/i,
+    `<meta property="og:title" content="${escapeHtml(title)}" />`
+  );
+  pageHtml = pageHtml.replace(
+    /<meta\s+property="og:description"\s+content=".*?"\s*\/?>/i,
+    `<meta property="og:description" content="${escapeHtml(page.description)}" />`
+  );
+  pageHtml = pageHtml.replace(
+    /<meta\s+property="og:url"\s+content=".*?"\s*\/?>/i,
+    `<meta property="og:url" content="${escapeHtml(canonicalUrl)}" />`
+  );
+  pageHtml = pageHtml.replace(
+    /<meta\s+name="twitter:title"\s+content=".*?"\s*\/?>/i,
+    `<meta name="twitter:title" content="${escapeHtml(title)}" />`
+  );
+  pageHtml = pageHtml.replace(
+    /<meta\s+name="twitter:description"\s+content=".*?"\s*\/?>/i,
+    `<meta name="twitter:description" content="${escapeHtml(page.description)}" />`
+  );
+  return pageHtml;
+}
+
+async function prerenderCorePages(templateHtml) {
+  const vite = await createServer({
+    configFile: path.join(ROOT_DIR, 'vite.config.js'),
+    server: { middlewareMode: true },
+    appType: 'custom',
+    logLevel: 'error',
+  });
+  const previousWindow = globalThis.window;
+  const previousLocalStorage = globalThis.localStorage;
+  const previousDocument = globalThis.document;
+  const prerenderStorage = new Map();
+
+  try {
+    globalThis.localStorage = {
+      getItem: (key) => prerenderStorage.get(key) ?? null,
+      setItem: (key, value) => prerenderStorage.set(key, String(value)),
+      removeItem: (key) => prerenderStorage.delete(key),
+    };
+    globalThis.document = {
+      documentElement: { getAttribute: () => null },
+    };
+    const { ContentService } = await vite.ssrLoadModule('/src/data/ContentService.js');
+    ContentService.fetchContent = async () => {};
+    const [
+      home,
+      about,
+      products,
+      blogs,
+      contact,
+      header,
+      footer,
+      chatbot,
+    ] = await Promise.all([
+      vite.ssrLoadModule('/src/pages/Home.js'),
+      vite.ssrLoadModule('/src/pages/About.js'),
+      vite.ssrLoadModule('/src/pages/Products.js'),
+      vite.ssrLoadModule('/src/pages/Blogs.js'),
+      vite.ssrLoadModule('/src/pages/Contact.js'),
+      vite.ssrLoadModule('/src/components/Header.js'),
+      vite.ssrLoadModule('/src/components/Footer.js'),
+      vite.ssrLoadModule('/src/components/Chatbot.js'),
+    ]);
+    const renderers = { home, about, products, blogs, contact };
+
+    for (const page of CORE_PAGE_MODULES) {
+      globalThis.window = {
+        location: {
+          pathname: page.route,
+          search: '',
+          hash: '',
+          origin: BASE_ORIGIN,
+        },
+      };
+      const renderer = renderers[page.route === '/' ? 'home' : page.route.slice(1)];
+      const body = renderer[page.render]();
+      const h1Count = (body.match(/<h1(?:\s|>)/gi) || []).length;
+      if (h1Count !== 1) {
+        throw new Error(`Core route ${page.route} must prerender exactly one H1; found ${h1Count}.`);
+      }
+
+      const appHtml = [
+        `<header class="site-header" id="site-header">${header.renderHeaderInner(page.route)}</header>`,
+        body,
+        footer.renderFooter(),
+        '<button class="back-to-top" id="back-to-top" aria-label="Back to top"><i class="fa-solid fa-arrow-up"></i></button>',
+        chatbot.renderChatbot(),
+      ].join('');
+      let pageHtml = replaceCorePageMetadata(templateHtml, page);
+      pageHtml = pageHtml.replace('<header class="site-header" id="site-header"></header>', '');
+      pageHtml = pageHtml.replace('<div id="app"></div>', `<div id="app">${appHtml}</div>`);
+
+      const outputPath = page.route === '/'
+        ? path.join(DIST_DIR, 'index.html')
+        : path.join(DIST_DIR, page.route.slice(1), 'index.html');
+      fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+      fs.writeFileSync(outputPath, pageHtml, 'utf-8');
+    }
+  } finally {
+    if (previousWindow === undefined) {
+      delete globalThis.window;
+    } else {
+      globalThis.window = previousWindow;
+    }
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage;
+    } else {
+      globalThis.localStorage = previousLocalStorage;
+    }
+    if (previousDocument === undefined) {
+      delete globalThis.document;
+    } else {
+      globalThis.document = previousDocument;
+    }
+    await vite.close();
+  }
 }
 
 async function run() {
@@ -241,6 +406,9 @@ async function run() {
     fs.mkdirSync(targetDir, { recursive: true });
     fs.writeFileSync(path.join(targetDir, 'index.html'), pageHtml, 'utf-8');
   }
+
+  console.log('Prerendering core pages...');
+  await prerenderCorePages(templateHtml);
 
   // Generate XML Sitemap
   console.log('Generating public sitemap.xml...');

@@ -1,14 +1,14 @@
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import { createInterface } from "node:readline";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createPasswordHash } from "../src/auth/security.js";
 
-const prisma = new PrismaClient();
-
-function ask(question) {
+function ask(question, input = process.stdin, output = process.stdout) {
   const readline = createInterface({
-    input: process.stdin,
-    output: process.stdout,
+    input,
+    output,
   });
 
   return new Promise((resolve) => {
@@ -19,20 +19,19 @@ function ask(question) {
   });
 }
 
-function askHidden(question) {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+function askHidden(question, input = process.stdin, output = process.stdout) {
+  if (!input.isTTY || !output.isTTY) {
     return Promise.reject(new Error("Interactive terminal required."));
   }
 
   return new Promise((resolve, reject) => {
     let value = "";
-    const input = process.stdin;
 
     function finish(error) {
       input.removeListener("data", onData);
       input.setRawMode(false);
       input.pause();
-      process.stdout.write("\n");
+      output.write("\n");
       if (error) {
         reject(error);
       } else {
@@ -58,7 +57,7 @@ function askHidden(question) {
       }
     }
 
-    process.stdout.write(question);
+    output.write(question);
     input.setEncoding("utf8");
     input.setRawMode(true);
     input.resume();
@@ -66,32 +65,45 @@ function askHidden(question) {
   });
 }
 
-async function provisionAdmin() {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    throw new Error("Interactive terminal required.");
-  }
-
-  const email = (await ask("Administrator email: ")).trim().toLowerCase();
+export function validateAdminEmail(value) {
+  const email = typeof value === "string" ? value.trim().toLowerCase() : "";
   if (
     email.length > 254 ||
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
   ) {
     throw new Error("Invalid administrator email.");
   }
+  return email;
+}
 
-  const password = await askHidden("Password (input hidden): ");
-  const confirmation = await askHidden("Confirm password (input hidden): ");
-
+export function validateAdminPassword(password, confirmation = password) {
   if (
+    typeof password !== "string" ||
     password.length < 14 ||
     password.length > 1024 ||
     password !== confirmation
   ) {
     throw new Error("Password did not meet requirements or confirmation differed.");
   }
+  return password;
+}
 
+export function getNonInteractiveCredentials(env = process.env) {
+  if (!env.ADMIN_EMAIL || !env.ADMIN_PASSWORD) {
+    throw new Error(
+      "Non-interactive provisioning requires ADMIN_EMAIL and ADMIN_PASSWORD."
+    );
+  }
+
+  return {
+    email: validateAdminEmail(env.ADMIN_EMAIL),
+    password: validateAdminPassword(env.ADMIN_PASSWORD),
+  };
+}
+
+export async function provisionAdmin(prismaClient, { email, password }) {
   const passwordHash = await createPasswordHash(password);
-  await prisma.adminUser.create({
+  return prismaClient.adminUser.create({
     data: {
       email,
       passwordHash,
@@ -101,22 +113,61 @@ async function provisionAdmin() {
     },
     select: { id: true },
   });
-
-  process.stdout.write("Administrator account provisioned.\n");
 }
 
-try {
-  await provisionAdmin();
-} catch {
-  process.stderr.write(
-    "Admin provisioning failed. Check the database connection, email uniqueness, and interactive password requirements.\n"
-  );
-  process.exitCode = 1;
-} finally {
-  try {
-    await prisma.$disconnect();
-  } catch {
-    process.stderr.write("Database client cleanup failed.\n");
-    process.exitCode = 1;
+async function getInteractiveCredentials(input = process.stdin, output = process.stdout) {
+  if (!input.isTTY || !output.isTTY) {
+    throw new Error("Interactive terminal required.");
   }
+
+  const email = validateAdminEmail(await ask("Administrator email: ", input, output));
+  const password = await askHidden("Password (input hidden): ", input, output);
+  const confirmation = await askHidden("Confirm password (input hidden): ", input, output);
+
+  return { email, password: validateAdminPassword(password, confirmation) };
+}
+
+export async function runProvisionAdmin({
+  args = process.argv.slice(2),
+  env = process.env,
+  input = process.stdin,
+  output = process.stdout,
+  errorOutput = process.stderr,
+  createPrismaClient = () => new PrismaClient(),
+} = {}) {
+  let prismaClient;
+  try {
+    const unknownArgs = args.filter((arg) => arg !== "--non-interactive");
+    if (unknownArgs.length > 0 || args.length > 1) {
+      throw new Error("Unsupported provisioning arguments.");
+    }
+
+    const credentials = args.includes("--non-interactive")
+      ? getNonInteractiveCredentials(env)
+      : await getInteractiveCredentials(input, output);
+
+    prismaClient = createPrismaClient();
+    await provisionAdmin(prismaClient, credentials);
+    output.write("Administrator account provisioned.\n");
+    return true;
+  } catch {
+    errorOutput.write(
+      "Admin provisioning failed. Check the database connection, email uniqueness, and supplied credentials.\n"
+    );
+    return false;
+  } finally {
+    if (prismaClient) {
+      try {
+        await prismaClient.$disconnect();
+      } catch {
+        errorOutput.write("Database client cleanup failed.\n");
+        process.exitCode = 1;
+      }
+    }
+  }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+  const succeeded = await runProvisionAdmin();
+  if (!succeeded) process.exitCode = 1;
 }

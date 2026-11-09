@@ -16,7 +16,7 @@
 import { PrismaClient } from '@prisma/client';
 import { verifyDatabaseSafety } from './verify-db-target.js';
 import { normalizeCatalog, validateHierarchy, computeFingerprint, analyzeTransfer } from '../src/routes/transfer.js';
-import { CATALOG } from '../../src/data/catalogData.js';
+import { CATALOG } from '../../shared/catalogData.js';
 
 export async function inspectBaselineCatalog(prismaClient) {
   const [oemCount, catCount, prodCount, importRunCount, importItemCount] = await Promise.all([

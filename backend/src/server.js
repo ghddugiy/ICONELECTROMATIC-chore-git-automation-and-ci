@@ -232,6 +232,79 @@ export function createApp({
  */
 export const SHUTDOWN_TIMEOUT_MS = 10_000;
 
+function safeProcessErrorDetails(error, env = process.env) {
+  let details;
+  if (error instanceof Error) {
+    details = `${error.name}: ${error.message}${error.stack ? `\n${error.stack}` : ""}`;
+  } else if (typeof error === "string") {
+    details = error;
+  } else {
+    details = String(error);
+  }
+
+  details = details.replace(
+    /\b(postgres(?:ql)?|mysql|redis):\/\/[^\s/@]+@/gi,
+    "$1://[REDACTED]@"
+  );
+  const sensitiveValues = Object.entries(env)
+    .filter(([name, value]) =>
+      /(?:PASSWORD|SECRET|TOKEN|API_KEY|DATABASE_URL)/i.test(name) &&
+      typeof value === "string" &&
+      value.length > 0
+    )
+    .map(([, value]) => value)
+    .sort((left, right) => right.length - left.length);
+
+  for (const value of sensitiveValues) {
+    details = details.split(value).join("[REDACTED]");
+  }
+
+  return details;
+}
+
+export function createProcessErrorHandlers({
+  processObject = process,
+  shutdown,
+  errorLogger = console.error,
+  env = process.env,
+} = {}) {
+  if (typeof shutdown !== "function") {
+    throw new TypeError("A shutdown handler is required.");
+  }
+
+  const onUnhandledRejection = (reason) =>
+    reportFatalError("unhandledRejection", reason);
+  const onUncaughtException = (error) =>
+    reportFatalError("uncaughtException", error);
+
+  function exitAfterShutdownFailure(error) {
+    errorLogger(
+      "[process] Fatal-error shutdown failed:\n" +
+        safeProcessErrorDetails(error, env)
+    );
+    if (typeof processObject.exit === "function") {
+      processObject.exit(1);
+    }
+  }
+
+  function reportFatalError(event, error) {
+    errorLogger(`[process] ${event}; shutting down:\n${safeProcessErrorDetails(error, env)}`);
+    try {
+      Promise.resolve(shutdown(event, 1)).catch(exitAfterShutdownFailure);
+    } catch (shutdownError) {
+      exitAfterShutdownFailure(shutdownError);
+    }
+  }
+
+  processObject.on("unhandledRejection", onUnhandledRejection);
+  processObject.on("uncaughtException", onUncaughtException);
+
+  return function removeProcessErrorHandlers() {
+    processObject.off("unhandledRejection", onUnhandledRejection);
+    processObject.off("uncaughtException", onUncaughtException);
+  };
+}
+
 /**
  * Returns a shutdown function that stops the HTTP server gracefully, then
  * disconnects Prisma. Designed to be called from SIGTERM / SIGINT handlers.
@@ -249,11 +322,16 @@ export function createShutdownHandler({
   onExit = (code) => process.exit(code),
 } = {}) {
   let isShuttingDown = false;
+  let requestedExitCode = 0;
 
-  return async function shutdown(signal) {
-    // Guard: if another signal arrives while already shutting down, do nothing.
-    if (isShuttingDown) return;
+  return async function shutdown(signal, exitCode = 0) {
+    // A fatal process error must override an earlier clean signal shutdown.
+    if (isShuttingDown) {
+      if (exitCode !== 0) requestedExitCode = exitCode;
+      return;
+    }
     isShuttingDown = true;
+    requestedExitCode = exitCode;
 
     console.info(`[shutdown] Received ${signal}. Starting graceful shutdown…`);
 
@@ -281,10 +359,13 @@ export function createShutdownHandler({
         await prismaClient.$disconnect();
         console.info("[shutdown] Prisma disconnected. Shutdown complete.");
         clearTimeout(timer);
-        onExit(0);
+        onExit(requestedExitCode);
       } catch (err) {
         // Database cleanup failed — report failure so the orchestrator can restart.
-        console.error("[shutdown] Prisma disconnect error:", err.message);
+        console.error(
+          "[shutdown] Prisma disconnect error:",
+          safeProcessErrorDetails(err)
+        );
         clearTimeout(timer);
         onExit(1);
       }
@@ -334,6 +415,7 @@ if (isDirectRun) {
   });
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT",  () => shutdown("SIGINT"));
+  createProcessErrorHandlers({ shutdown });
 }
 
 export default app;

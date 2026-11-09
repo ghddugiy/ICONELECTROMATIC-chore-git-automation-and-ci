@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
-import { CATALOG } from "../../src/data/catalogData.js";
+import { CATALOG } from "../../shared/catalogData.js";
 import {
   normalizeCatalog,
   validateHierarchy,
@@ -754,4 +754,3 @@ test("POST-TRANSFER DATABASE VERIFICATION: PostgreSQL catalog tables contain the
   assert.ok(importRunCount >= 1, `importRun table must have at least 1 record, got ${importRunCount}`);
   assert.ok(importItemCount >= 272, `importItem table must have at least 272 records (15+88+169), got ${importItemCount}`);
 });
-

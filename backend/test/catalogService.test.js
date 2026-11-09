@@ -12,7 +12,7 @@ if (typeof globalThis.localStorage === 'undefined') {
   };
 }
 
-import { CATALOG } from '../../src/data/catalogData.js';
+import { CATALOG } from '../../shared/catalogData.js';
 import { CatalogService, createReconciliationPreview } from '../../src/data/CatalogService.js';
 import { ApiService } from '../../src/data/ApiService.js';
 
