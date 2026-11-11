@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
+    "test": "node scripts/run-tests.js",
     "migrate": "prisma migrate deploy",
     "seed:production-catalog": "node scripts/seed-production-catalog.js"
   },

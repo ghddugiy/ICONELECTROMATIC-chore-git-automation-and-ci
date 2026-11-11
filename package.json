@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && node scripts/prerender.js",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "npm --prefix backend test"
   },
   "devDependencies": {
     "vite": "^5.4.0"

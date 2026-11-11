@@ -22,18 +22,54 @@ export function createAttemptLimiter({
 } = {}) {
   const attemptsByClient = new Map();
   let requestsSincePrune = 0;
+  let nextCapacityPruneAt = Number.NEGATIVE_INFINITY;
 
   function pruneExpired(currentTime) {
+    let earliestResetAt = Number.POSITIVE_INFINITY;
     for (const [client, bucket] of attemptsByClient) {
       if (bucket.resetAt <= currentTime) {
         attemptsByClient.delete(client);
+      } else {
+        earliestResetAt = Math.min(earliestResetAt, bucket.resetAt);
       }
     }
+    nextCapacityPruneAt = Number.isFinite(earliestResetAt)
+      ? earliestResetAt
+      : Number.NEGATIVE_INFINITY;
+  }
+
+  function getSaturationRetryAfterSeconds(currentTime) {
+    if (!Number.isFinite(nextCapacityPruneAt)) {
+      return Math.max(1, Math.ceil(windowMs / 1000));
+    }
+
+    return Math.max(1, Math.ceil((nextCapacityPruneAt - currentTime) / 1000));
+  }
+
+  function makeRoomForClient(currentTime) {
+    if (attemptsByClient.size >= maxClients) {
+      if (currentTime >= nextCapacityPruneAt) {
+        pruneExpired(currentTime);
+      }
+    }
+
+    if (attemptsByClient.size < maxClients) {
+      return { available: true, retryAfterSeconds: 0 };
+    }
+
+    return {
+      available: false,
+      retryAfterSeconds: getSaturationRetryAfterSeconds(currentTime),
+    };
   }
 
   function getBucket(clientKey, currentTime) {
     let bucket = attemptsByClient.get(clientKey);
     if (!bucket || bucket.resetAt <= currentTime) {
+      if (bucket) {
+        attemptsByClient.delete(clientKey);
+        nextCapacityPruneAt = Number.NEGATIVE_INFINITY;
+      }
       return null;
     }
     return bucket;
@@ -51,10 +87,11 @@ export function createAttemptLimiter({
       let bucket = attemptsByClient.get(clientKey);
 
       if (!bucket || bucket.resetAt <= currentTime) {
-        if (attemptsByClient.size >= maxClients) {
+        const capacity = makeRoomForClient(currentTime);
+        if (!capacity.available) {
           return {
             allowed: false,
-            retryAfterSeconds: Math.ceil(windowMs / 1000),
+            retryAfterSeconds: capacity.retryAfterSeconds,
           };
         }
 
@@ -85,7 +122,17 @@ export function createAttemptLimiter({
       }
       const currentTime = now();
       const bucket = getBucket(clientKey, currentTime);
-      if (!bucket || bucket.count < maxAttempts) {
+      if (!bucket) {
+        const capacity = makeRoomForClient(currentTime);
+        if (!capacity.available) {
+          return {
+            blocked: true,
+            retryAfterSeconds: capacity.retryAfterSeconds,
+          };
+        }
+        return { blocked: false, retryAfterSeconds: 0 };
+      }
+      if (bucket.count < maxAttempts) {
         return { blocked: false, retryAfterSeconds: 0 };
       }
       return {
@@ -110,10 +157,11 @@ export function createAttemptLimiter({
 
       let bucket = attemptsByClient.get(clientKey);
       if (!bucket || bucket.resetAt <= currentTime) {
-        if (attemptsByClient.size >= maxClients) {
+        const capacity = makeRoomForClient(currentTime);
+        if (!capacity.available) {
           return {
             allowed: false,
-            retryAfterSeconds: Math.ceil(windowMs / 1000),
+            retryAfterSeconds: capacity.retryAfterSeconds,
           };
         }
 
@@ -140,8 +188,8 @@ export function createAttemptLimiter({
     },
 
     reset(clientKey) {
-      if (clientKey) {
-        attemptsByClient.delete(clientKey);
+      if (clientKey && attemptsByClient.delete(clientKey)) {
+        nextCapacityPruneAt = Number.NEGATIVE_INFINITY;
       }
     },
 
@@ -192,11 +240,23 @@ export function createLoginRateLimitMiddleware({
     // Attach security hooks for the route handler to report outcome
     req.loginSecurity = {
       recordFailure(email) {
-        ipLimiter.recordFailure(clientIp);
+        const results = [ipLimiter.recordFailure(clientIp)];
         const resolvedEmail = normalizeEmail(email || targetEmail);
         if (resolvedEmail) {
-          emailLimiter.recordFailure(resolvedEmail);
+          results.push(emailLimiter.recordFailure(resolvedEmail));
         }
+
+        const rejectedResults = results.filter((result) => !result.allowed);
+        if (rejectedResults.length > 0) {
+          return {
+            allowed: false,
+            retryAfterSeconds: Math.max(
+              ...rejectedResults.map((result) => result.retryAfterSeconds)
+            ),
+          };
+        }
+
+        return { allowed: true, retryAfterSeconds: 0 };
       },
       recordSuccess(email) {
         // Reset the IP login-failure counter only after successful authentication

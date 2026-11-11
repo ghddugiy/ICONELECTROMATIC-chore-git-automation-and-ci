@@ -195,6 +195,113 @@ test("Login rate limiter tracks failed attempts by IP and email independently", 
   });
 });
 
+test("Login rate limiter rejects new clients at saturation and recovers after expiry", async () => {
+  let currentTime = 10000;
+  let mockClientIp = "new-ip";
+  let credentialLookups = 0;
+  const ipLimiter = createAttemptLimiter({
+    windowMs: 5000,
+    maxAttempts: 3,
+    maxClients: 2,
+    now: () => currentTime,
+  });
+  const emailLimiter = createAttemptLimiter({
+    windowMs: 5000,
+    maxAttempts: 3,
+    maxClients: 1,
+    now: () => currentTime,
+  });
+  ipLimiter.recordFailure("occupied-ip");
+  emailLimiter.recordFailure("occupied@example.com");
+
+  const rateLimitMiddleware = createLoginRateLimitMiddleware({
+    ipLimiter,
+    emailLimiter,
+    resolveIp: () => mockClientIp,
+  });
+  const authRouter = createAuthRouter({
+    prismaClient: {
+      adminUser: {
+        findUnique: async () => {
+          credentialLookups += 1;
+          return null;
+        },
+      },
+    },
+    loginRateLimitMiddleware: rateLimitMiddleware,
+    isProduction: false,
+  });
+  const app = createApp({ authRouter, isProduction: false });
+
+  await withServer(app, async (baseUrl) => {
+    const login = () =>
+      fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: "new@example.com",
+          password: "wrong-password",
+        }),
+      });
+
+    const blockedResponse = await login();
+    assert.equal(blockedResponse.status, 429);
+    assert.equal(blockedResponse.headers.get("retry-after"), "5");
+    assert.equal(credentialLookups, 0);
+
+    currentTime += 5000;
+    const recoveredResponse = await login();
+    assert.equal(recoveredResponse.status, 401);
+    assert.equal(credentialLookups, 1);
+  });
+});
+
+test("Login failure racing with map saturation returns 429 instead of dropping accounting", async () => {
+  const ipLimiter = createAttemptLimiter({
+    windowMs: 5000,
+    maxAttempts: 3,
+    maxClients: 1,
+  });
+  const emailLimiter = createAttemptLimiter({
+    windowMs: 5000,
+    maxAttempts: 3,
+    maxClients: 5,
+  });
+  const rateLimitMiddleware = createLoginRateLimitMiddleware({
+    ipLimiter,
+    emailLimiter,
+    resolveIp: () => "login-ip",
+  });
+  const authRouter = createAuthRouter({
+    prismaClient: {
+      adminUser: {
+        findUnique: async () => {
+          ipLimiter.recordFailure("concurrent-client");
+          return null;
+        },
+      },
+    },
+    loginRateLimitMiddleware: rateLimitMiddleware,
+    isProduction: false,
+  });
+  const app = createApp({ authRouter, isProduction: false });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: "admin@example.com",
+        password: "wrong-password",
+      }),
+    });
+
+    assert.equal(response.status, 429);
+    assert.ok(response.headers.get("retry-after"));
+    assert.match((await response.json()).message, /too many login attempts/i);
+  });
+});
+
 test("Successful login resets the IP failure counter", async () => {
   const ipLimiter = createAttemptLimiter({
     windowMs: 60000,

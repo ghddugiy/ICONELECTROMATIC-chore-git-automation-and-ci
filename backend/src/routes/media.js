@@ -22,6 +22,14 @@ const defaultR2Service = {
   validateImageBuffer,
 };
 
+function mediaUnavailableResponse(res) {
+  res.setHeader("Cache-Control", "no-store");
+  return res.status(502).json({
+    success: false,
+    message: "Media storage is temporarily unavailable.",
+  });
+}
+
 // Configure Multer with memory storage and 10 MB maximum size
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -231,22 +239,21 @@ export function createMediaRouter({
       // Stream directly from private R2 bucket with strong caching headers
       try {
         const s3Response = await r2Service.getObjectStream(asset.r2Key);
+        if (!s3Response.Body || typeof s3Response.Body.pipe !== "function") {
+          console.error("Cloudflare R2 returned a non-streamable public media body.");
+          return mediaUnavailableResponse(res);
+        }
+
         res.setHeader("Content-Type", asset.mimeType || "image/jpeg");
         res.setHeader("Cache-Control", "public, max-age=86400, immutable");
         if (asset.byteSize) {
           res.setHeader("Content-Length", asset.byteSize.toString());
         }
 
-        if (s3Response.Body && typeof s3Response.Body.pipe === "function") {
-          return s3Response.Body.pipe(res);
-        } else {
-          const presigned = await r2Service.getPresignedViewUrl(asset.r2Key, 900);
-          return res.redirect(302, presigned);
-        }
+        return s3Response.Body.pipe(res);
       } catch (streamError) {
-        // Fallback: generate a short-lived presigned URL and redirect
-        const presigned = await r2Service.getPresignedViewUrl(asset.r2Key, 900);
-        return res.redirect(302, presigned);
+        console.error("Failed to stream public media:", streamError.message);
+        return mediaUnavailableResponse(res);
       }
     } catch (error) {
       console.error("Error retrieving media file:", error.message);

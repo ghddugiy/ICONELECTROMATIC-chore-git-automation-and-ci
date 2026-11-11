@@ -81,7 +81,7 @@ test("login attempt limiter blocks at the threshold and resets after window", ()
   assert.equal(limiter.consume("client-a").allowed, true);
 });
 
-test("login attempt limiter prunes expired clients and remains bounded", () => {
+test("login attempt limiter prunes expired clients immediately at capacity", () => {
   let currentTime = 1000;
   const limiter = createAttemptLimiter({
     maxAttempts: 2,
@@ -94,13 +94,36 @@ test("login attempt limiter prunes expired clients and remains bounded", () => {
   assert.equal(limiter.consume("client-b").allowed, true);
 
   currentTime += 1000;
-  for (let attempt = 0; attempt < 253; attempt += 1) {
-    assert.equal(limiter.consume(`overflow-${attempt}`).allowed, false);
-  }
-
   assert.equal(limiter.consume("client-c").allowed, true);
   assert.equal(limiter.consume("client-d").allowed, true);
   assert.equal(limiter.consume("client-e").allowed, false);
+});
+
+test("login attempt limiter reclaims expired capacity and blocks unknown clients while full", () => {
+  let currentTime = 1000;
+  const limiter = createAttemptLimiter({
+    maxAttempts: 2,
+    windowMs: 1000,
+    maxClients: 1,
+    now: () => currentTime,
+  });
+
+  assert.equal(limiter.consume("active-client").allowed, true);
+  assert.deepEqual(limiter.isBlocked("new-client"), {
+    blocked: true,
+    retryAfterSeconds: 1,
+  });
+
+  currentTime += 1000;
+  assert.deepEqual(limiter.isBlocked("new-client"), {
+    blocked: false,
+    retryAfterSeconds: 0,
+  });
+  assert.equal(limiter.consume("new-client").allowed, true);
+  assert.equal(limiter.getCount("active-client"), 0);
+
+  currentTime += 1000;
+  assert.equal(limiter.consume("another-client").allowed, true);
 });
 
 test("admin middleware rejects missing sessions and enforces CSRF", async () => {

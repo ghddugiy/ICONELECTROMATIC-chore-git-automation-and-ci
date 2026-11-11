@@ -39,6 +39,48 @@ const VALID_WEBP_HEADER = Buffer.from([
   0x56, 0x50, 0x38, 0x20,
 ]);
 
+async function withPublicMediaServer({ r2Service, publicDomain = null }, callback) {
+  const originalPublicDomain = process.env.R2_PUBLIC_DOMAIN;
+  if (publicDomain === null) {
+    delete process.env.R2_PUBLIC_DOMAIN;
+  } else {
+    process.env.R2_PUBLIC_DOMAIN = publicDomain;
+  }
+
+  const mockPrisma = {
+    mediaAsset: {
+      findUnique: async () => ({
+        id: "media-public-test",
+        r2Key: "products/test-image.png",
+        mimeType: "image/png",
+        byteSize: VALID_1X1_PNG.length,
+        status: "ACTIVE",
+      }),
+    },
+  };
+  const app = express();
+  app.use(
+    "/api/media",
+    createMediaRouter({
+      prismaClient: mockPrisma,
+      r2Service,
+    })
+  );
+  const server = app.listen(0, "127.0.0.1");
+
+  try {
+    await new Promise((resolve) => server.once("listening", resolve));
+    await callback(`http://127.0.0.1:${server.address().port}`);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    if (originalPublicDomain === undefined) {
+      delete process.env.R2_PUBLIC_DOMAIN;
+    } else {
+      process.env.R2_PUBLIC_DOMAIN = originalPublicDomain;
+    }
+  }
+}
+
 // Skip in CI: this test hardcodes the production bucket name and requires real R2 credentials.
 test("R2 configuration validates required environment variables without leaking secrets", { skip: process.env.CI === "true" }, () => {
   const config = getR2Config();
@@ -297,6 +339,7 @@ test("POST /api/media/upload successfully uploads valid image, records MediaAsse
 
   let uploadedToS3 = null;
   let createdDbRecord = null;
+  let previewExpirySeconds = null;
 
   const mockR2Service = {
     validateImageBuffer,
@@ -307,7 +350,10 @@ test("POST /api/media/upload successfully uploads valid image, records MediaAsse
       return { ETag: '"test-etag"' };
     },
     deleteFromR2: async () => {},
-    getPresignedViewUrl: async (key) => `https://signed.example.com/${key}?token=abc`,
+    getPresignedViewUrl: async (key, expiresInSeconds) => {
+      previewExpirySeconds = expiresInSeconds;
+      return `https://signed.example.com/${key}?token=abc`;
+    },
   };
 
   const mockPrisma = {
@@ -381,6 +427,7 @@ test("POST /api/media/upload successfully uploads valid image, records MediaAsse
     assert.equal(body.data.byteSize, VALID_1X1_PNG.length);
     assert.ok(body.data.previewUrl.startsWith("https://signed.example.com/"));
     assert.equal(body.data.publicUrl, `/api/media/file/cm_asset_123`);
+    assert.equal(previewExpirySeconds, 3600);
 
     assert.ok(uploadedToS3, "Expected S3 upload to be invoked");
     assert.equal(uploadedToS3.key, "products/test-uuid-1234.png");
@@ -477,6 +524,72 @@ test("POST /api/media/upload executes rollback cleanup if database insert fails 
   } finally {
     server.close();
   }
+});
+
+test("Public media stream failures return non-cacheable errors instead of expiring redirects", async () => {
+  let presignedUrlCalls = 0;
+  const r2Service = {
+    getObjectStream: async () => ({ Body: null }),
+    getPresignedViewUrl: async () => {
+      presignedUrlCalls += 1;
+      return "https://signed.example.com/expired";
+    },
+  };
+
+  await withPublicMediaServer({ r2Service }, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/media/file/media-public-test`);
+    assert.equal(response.status, 502);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal(response.headers.get("location"), null);
+    assert.equal(presignedUrlCalls, 0);
+  });
+
+  const failingR2Service = {
+    getObjectStream: async () => {
+      throw new Error("temporary stream failure");
+    },
+    getPresignedViewUrl: async () => {
+      presignedUrlCalls += 1;
+      return "https://signed.example.com/expired";
+    },
+  };
+
+  await withPublicMediaServer({ r2Service: failingR2Service }, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/media/file/media-public-test`);
+    assert.equal(response.status, 502);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal(response.headers.get("location"), null);
+    assert.equal(presignedUrlCalls, 0);
+  });
+});
+
+test("Public media keeps the configured stable R2 public-domain URL", async () => {
+  let streamCalls = 0;
+  const r2Service = {
+    getObjectStream: async () => {
+      streamCalls += 1;
+      throw new Error("Configured public media must not use the private stream.");
+    },
+    getPresignedViewUrl: async () => {
+      throw new Error("Public media must not request a presigned URL.");
+    },
+  };
+
+  await withPublicMediaServer(
+    { r2Service, publicDomain: "https://cdn.example.com/" },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/media/file/media-public-test`, {
+        redirect: "manual",
+      });
+
+      assert.equal(response.status, 302);
+      assert.equal(
+        response.headers.get("location"),
+        "https://cdn.example.com/products/test-image.png"
+      );
+      assert.equal(streamCalls, 0);
+    }
+  );
 });
 
 // Live writes require explicit opt-in and a dedicated non-production bucket.

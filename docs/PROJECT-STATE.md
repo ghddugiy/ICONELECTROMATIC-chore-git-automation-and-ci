@@ -1,6 +1,6 @@
 # PROJECT-STATE.md - Icon Electromatic website
 
-Last updated: 2026-11-10
+Last updated: 2026-11-11
 Rule: update this file at the end of every task. Never write passwords, keys or tokens here.
 
 ## Goal
@@ -11,8 +11,9 @@ client-owned accounts and one year of maintenance.
 
 ## Current stage
 Phase 6 - Final handover corrections and verification. Production deployment
-and recovery operations remain client-owned and have not started; CSP
-enforcement remains deferred pending compatibility work and report-only testing.
+and recovery operations remain client-owned and have not started; frontend CSP
+enforcement remains deferred until the host and approved resource origins are
+confirmed and report-only checks are complete.
 
 ## Stage checklist
 - [x] Frontend built (reviewed at commit e371aac, 15 Oct 2026)
@@ -35,7 +36,8 @@ enforcement remains deferred pending compatibility work and report-only testing.
 - [x] Phase 4 handover preparation: the six existing deployment/service/audit/state guides now distinguish implemented behavior, client configuration, and future work; they cover the Node.js 22 runtime, static frontend and SPA behavior, API/sitemap proxy requirements, PostgreSQL/Prisma migration operations, guarded catalogue seeding, admin provisioning, backend-mediated R2, Resend DNS guidance, DNS/HTTPS, and an optional Nginx template. No client infrastructure was accessed or deployed. Vercel's backend origin and production hosting remain unconfigured pending client decisions.
 - [x] Phase 5 enterprise handover deliverables: created `docs/templates/nginx.conf.example`, `docs/DATA-DICTIONARY.md`, and `docs/DISASTER-RECOVERY-RUNBOOK.md`; linked them from the client, deployment, and R2 guides. The dictionary is checked against all 17 Prisma models, 10 enums, and five SQL migrations; the actual schema has 10 enums, correcting the plan's estimate of nine. The runbook marks production recovery actions as requiring client authorization and distinguishes the local Docker test database (`icon_electromatic_test`, port `5433`) from client production hosting. Production infrastructure, databases, credentials, email, R2, and deployment were not accessed.
 - [x] Phase 6 final handover corrections (2026-11-10): removed the specified unsupported homepage hero claims; documented CSP deferral, clarified trusted-proxy requirements, replaced developer-machine links in the audit, added the GitHub source handover guide, and documented live R2 test-bucket safeguards. Verification: frontend tests 8/8 passed; production build passed with 169 product pages and 176 unique sitemap URLs; specified claims were absent from Home.js, ContentService.js, and generated homepage HTML; changed-document local links passed; `git diff --check` passed. A safe backend run passed 186 tests, skipped 3, and had 4 PostgreSQL-dependent failures because database URLs were intentionally unset; no production database, email provider, or live R2 was contacted. CSP enforcement, production launch, and client-owned GitHub changes remain outstanding.
-- [ ] Outstanding schema review: `CmsDocument` appears unused by application code but remains in the Prisma schema and applied migration. Confirm database state and migration dependencies before considering removal.
+- [x] Final technical issue remediation (2026-11-11): login limiter saturation now prunes expired capacity, rejects unknown clients while full, and returns 429 if a concurrent failure cannot be recorded; public media no longer redirects to an expiring presigned URL when R2 streaming fails; root/backend test scripts and a local test-database guard are documented and CI uses the backend script. The Employee Zone link remains public navigation only, with admin APIs protected by session, role, and CSRF checks. The catalogue remains canonical in `shared/` and deployment still requires the complete repository checkout. `CmsDocument` remains retained because no application use was found but database contents were not verified. CSP remains deferred until the frontend host and resource origins are confirmed. Verification: frontend build passed (169 product pages, 176 sitemap URLs); focused auth/security tests passed (22/22); mocked R2 media tests passed (12 passed, 3 skipped); changed JavaScript parsed and `git diff --check` passed. Docker was unavailable, so no database tests/query ran; no live R2, email, production infrastructure, or deployment was accessed.
+- [ ] Outstanding schema review: `CmsDocument` has no application-code usage in the checked-in source and its table is created by the existing migration. Retain the model/table; the local Docker test database was unavailable for a read-only row check, and no client/production database was accessed.
 - [x] Phase 1 - Separate Express server, health endpoint, and backend dev/start scripts
 - [x] PostgreSQL connection to the existing `icon_electromatic` database tested
 - [x] Initial Prisma migration `20261017100248_init` recorded as applied
@@ -93,10 +95,10 @@ enforcement remains deferred pending compatibility work and report-only testing.
 - A managed headless CMS (for example Sanity) as the backend; Supabase with custom admin is the alternative
 - A small serverless function for enquiries (validation, spam protection, regional email routing, saved copy)
 
-## Known issues (reviewed 2026-11-10)
+## Known issues (reviewed 2026-11-11)
 - Web addresses use clean HTML5 history routing with build-time static HTML prerendering (`dist/product/:id/index.html`) and backward-compatible redirects from legacy `/#/product/:id` URLs. Search engine indexing requires post-deployment verification in Google Search Console.
 - Contact and careers forms now POST to real backend endpoints (`/api/enquiries/contact`, `/api/enquiries/careers`); email delivery requires `RESEND_API_KEY` and `CONTACT_EMAIL` to be configured in `backend/.env` — see `backend/.env.example` for setup steps
-- Demo admin: password is pre-filled in the page (to be cleared in Stage 1 cleanup); non-catalog edits are now persisted directly in PostgreSQL via SiteContent; Employee Zone link is public, admin code ships in the production bundle
+- Demo admin: password is pre-filled in the page (to be cleared in Stage 1 cleanup); non-catalog edits are now persisted directly in PostgreSQL via SiteContent. The public Employee Zone link is navigation only; backend admin routes enforce session, role, and CSRF checks. Admin code ships in the production bundle.
 - Old fake product files (products.js, ProductDetail.js) are still in the repo
 - Unsupported homepage hero statistics and certification claims were removed from the homepage rendering and default content. The Admin editor's example placeholder is not approved product or certification evidence and must not be used as a public claim.
 - The About-page default statistics in `src/data/ContentService.js` still include `1,500+` products, `150+` years of combined experience, and `15+` partners. These were outside the homepage correction and need client evidence review before they are treated as approved public claims.

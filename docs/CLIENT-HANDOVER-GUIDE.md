@@ -340,6 +340,48 @@ npm start
 * Starts `src/server.js` using the provider-assigned `PORT`, or the application's
   default port when the provider does not set one.
 
+### Backend Tests
+
+From the repository root, set `TEST_DATABASE_URL` in the local PowerShell
+session to the Docker test database `icon_electromatic_test` on port `5433`,
+then run:
+
+```powershell
+npm test
+```
+
+The test runner rejects missing or non-local test database URLs, sets
+`NODE_ENV=test`, and enables the suite's CI skips for tests that require live R2
+or production-seeded catalog data. GitHub Actions uses its isolated
+`icon_ci_test` database. The test suite includes database-backed tests and may
+write test fixtures; do not point it at the native CMS database on port `5432`
+or at any database containing data that must be preserved. The runner does not
+apply migrations or reset databases.
+
+### Content Security Policy
+
+The Express backend serves API/media responses, not the frontend document, so
+its disabled Helmet CSP does not protect the static website. Apply CSP at the
+selected frontend host. That host is not selected yet, so enforcement remains
+deferred.
+
+The current page requires local scripts, inline styles used by generated
+markup, Google Fonts (`fonts.googleapis.com` and `fonts.gstatic.com`), and
+Font Awesome CSS/fonts from `cdnjs.cloudflare.com`. API requests use same-origin
+`/api` by default but can use a configured API origin. CMS/product images and
+media may use configured R2/CDN or approved external origins.
+
+Candidate policy for **Report-Only review only**, not a ready-to-enforce header:
+
+```text
+default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: <approved-image-origins>; media-src 'self' blob: <approved-media-origins>; connect-src 'self' <configured-backend-origin>; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'
+```
+
+Replace the placeholders only with client-approved origins. Review browser
+violations on public pages and `/admin`, including API requests, R2 images/media,
+fonts, and CMS behavior, before considering enforcement. Do not copy this draft
+as an enforcing policy while its origins remain unresolved.
+
 ---
 
 ## 9. Administrator Guide: Enquiries & CSV Reports

@@ -30,6 +30,22 @@ function invalidCredentials(res) {
   });
 }
 
+function loginRateLimitResponse(res, retryAfterSeconds) {
+  res.set("Retry-After", String(retryAfterSeconds));
+  return res.status(429).json({
+    success: false,
+    message: "Too many login attempts. Please try again later.",
+  });
+}
+
+function recordFailureResponse(req, res, email) {
+  const result = req.loginSecurity?.recordFailure(email);
+  if (result && !result.allowed) {
+    return loginRateLimitResponse(res, result.retryAfterSeconds);
+  }
+  return null;
+}
+
 function isValidLoginBody(body) {
   if (
     body === null ||
@@ -66,8 +82,7 @@ export function createAuthRouter({
 
   router.post("/login", loginRateLimitMiddleware, async (req, res) => {
     if (!isValidLoginBody(req.body)) {
-      req.loginSecurity?.recordFailure(req.body?.email);
-      return invalidRequest(res);
+      return recordFailureResponse(req, res, req.body?.email) || invalidRequest(res);
     }
 
     try {
@@ -93,8 +108,7 @@ export function createAuthRouter({
         user.role !== "ADMIN" ||
         !passwordIsValid
       ) {
-        req.loginSecurity?.recordFailure(email);
-        return invalidCredentials(res);
+        return recordFailureResponse(req, res, email) || invalidCredentials(res);
       }
 
       // Successful authentication: reset failed-attempt counter for IP and email

@@ -134,7 +134,7 @@ jobs:
         run: node scripts/seed-ci-catalog.js
 
       - name: Run backend tests
-        run: node --test test/*.test.js
+        run: npm test
 
   # ── Job 3: Prisma schema validation ─────────────────────────────────────────
   prisma-validate:
