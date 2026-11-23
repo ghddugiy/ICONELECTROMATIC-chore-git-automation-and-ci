@@ -1,6 +1,6 @@
 # PROJECT-STATE.md - Icon Electromatic website
 
-Last updated: 2026-11-16
+Last updated: 2026-11-24
 Rule: update this file at the end of every task. Never write passwords, keys or tokens here.
 
 ## Goal
@@ -23,6 +23,7 @@ confirmed and report-only checks are complete.
 - [x] Stage 3 - Backend and CMS: Express API foundation, Prisma PostgreSQL schema, session auth with CSRF, frontend ApiService/CatalogService connection, read-only catalog transfer preview, and R2 architecture documentation
 - [x] Stage 4 - Enquiry forms that really send email (contact, RFQ, and careers)
 - [x] Stage 5 - Connect everything, real URLs, static pages (clean HTML5 history routing without hash fragments, backward-compatible redirect from #/product/:id to /product/:id, build-time prerendering for all 169 active products at dist/product/:id/index.html with valid metadata, single H1 and non-empty body for non-JS readers)
+- [x] Preserved 26 active website and catalog images (2026-11-24): exported 6 Rogers products, 7 OEM partner logos, 6 services slides, 3 MAPCON event photo cards, and 4 About Us highlights from Cloudflare R2 into public/images/ structured folders. Linked static fallback paths in shared/catalogData.js and src/data/ContentService.js so Vercel deployments display all photos immediately without requiring an active backend or database, while preserving future dynamic CMS updates. Production build succeeded (159 products prerendered, 166 sitemap URLs) and all 22 frontend unit tests passed.
 - [ ] Stage 6 - Security and safety nets
 - [x] Stage 7 - SEO for every product and the whole site (dynamic product-specific titles, meta descriptions, canonical tags, Open Graph, Twitter cards, Schema.org JSON-LD structured data, robots.txt, 169 prerendered HTML pages, and 176-URL sitemap.xml)
 - [ ] Stage 8 - Testing and launch

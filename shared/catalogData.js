@@ -16,7 +16,7 @@ export const CATALOG = [
     accentColor: "#CC0000",
     glowColor: "rgba(204, 0, 0, 0.4)",
     defaultImage: "/images/rf-laminate.jpg",
-    logoImg: "/images/oem-logos/Rogers_Logo_no_bg.png",
+    logoImg: "/images/partners/oem-rogers-corporation.png",
     logoSvg: "<svg viewBox=\"0 0 200 42\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"2\" y=\"2\" width=\"38\" height=\"38\" rx=\"8\" fill=\"#CC0000\"/><path d=\"M14 11h9c4 0 6.5 2 6.5 5.2 0 2.5-1.5 4.3-4 4.9l4.8 9.9h-4.8l-4.2-9h-2.5V31H14V11zm4 7.8h4.3c1.8 0 2.8-.9 2.8-2.2 0-1.3-1-2.2-2.8-2.2H18v4.4z\" fill=\"#FFFFFF\"/><text x=\"49\" y=\"23\" fill=\"#FFFFFF\" font-family=\"'Plus Jakarta Sans', sans-serif\" font-weight=\"900\" font-size=\"17\" letter-spacing=\"1.5\">ROGERS</text><text x=\"50\" y=\"34\" fill=\"#94A3B8\" font-family=\"'Plus Jakarta Sans', sans-serif\" font-weight=\"700\" font-size=\"8\" letter-spacing=\"2.2\">CORPORATION</text></svg>",
     categories: [
       {
@@ -352,7 +352,7 @@ export const CATALOG = [
             description: "Toughened bondply for sequential lamination.",
             applications: "High layer count RF boards.",
             link: "https://www.rogerscorp.com/advanced-electronics-solutions/prepregs-and-bondplys",
-            image: "/images/products/image16.jpeg"
+            image: "/images/products/rogers-ro4450t-bondply.jpg"
           },
           {
             id: "2929-bondply-34",
@@ -361,7 +361,7 @@ export const CATALOG = [
             description: "Thin adhesive bondply for RF multilayer constructions.",
             applications: "Microwave multilayer bonding.",
             link: "https://www.rogerscorp.com/advanced-electronics-solutions/prepregs-and-bondplys",
-            image: "/images/products/image17.jpeg"
+            image: "/images/products/rogers-2929-bondply.jpg"
           },
           {
             id: "cuclad-6250-bonding-film-35",
@@ -370,7 +370,7 @@ export const CATALOG = [
             description: "Thermoplastic bonding film with low dielectric loss.",
             applications: "RF multilayer laminations.",
             link: "https://www.rogerscorp.com/advanced-electronics-solutions/prepregs-and-bondplys",
-            image: "/images/products/image18.jpeg"
+            image: "/images/products/rogers-cuclad-6250-bonding-film.jpg"
           },
           {
             id: "cuclad-6700-bonding-film-36",
@@ -379,7 +379,7 @@ export const CATALOG = [
             description: "CTFE bonding film with excellent electrical properties.",
             applications: "High reliability RF boards.",
             link: "https://www.rogerscorp.com/advanced-electronics-solutions/prepregs-and-bondplys",
-            image: "/images/products/image19.jpeg"
+            image: "/images/products/rogers-cuclad-6700-bonding-film.jpg"
           },
           {
             id: "speedwave-300p-prepreg-37",
@@ -388,7 +388,7 @@ export const CATALOG = [
             description: "Ultra-low loss prepreg for high-speed & RF designs.",
             applications: "5G, radar, aerospace electronics.",
             link: "https://www.rogerscorp.com/advanced-electronics-solutions/prepregs-and-bondplys",
-            image: "/images/products/image20.jpeg"
+            image: "/images/products/rogers-speedwave-300p-prepreg.jpg"
           },
           {
             id: "xtremespeed-ro1200-38",
@@ -397,7 +397,7 @@ export const CATALOG = [
             description: "Ultra-low loss, low Dk laminate for very high-speed digital and RF designs.",
             applications: "High-speed digital, data centers, advanced RF.",
             link: "https://www.rogerscorp.com/advanced-electronics-solutions/xtremespeed-ro1200-laminates",
-            image: "/images/products/image21.jpeg"
+            image: "/images/products/rogers-xtremespeed-ro1200.jpg"
           },
         ]
       },
@@ -414,7 +414,7 @@ export const CATALOG = [
     accentColor: "#CC0000",
     glowColor: "rgba(204, 0, 0, 0.4)",
     defaultImage: "/images/rf-filter.jpg",
-    logoImg: "/images/oem-logos/mini-circuits-seeklogo.png",
+    logoImg: "/images/partners/oem-minicircuits.png",
     logoSvg: "<svg viewBox=\"0 0 215 42\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"2\" y=\"2\" width=\"38\" height=\"38\" rx=\"9\" fill=\"#E11D48\"/><path d=\"M7 21c2.8-6.5 5.6-6.5 8.4 0s5.6 6.5 8.4 0s5.6-6.5 8.4 0\" stroke=\"#FFFFFF\" stroke-width=\"2.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><text x=\"48\" y=\"27\" fill=\"#FFFFFF\" font-family=\"'Plus Jakarta Sans', sans-serif\" font-weight=\"800\" font-size=\"18\" letter-spacing=\"-0.4\">Mini-Circuits</text><circle cx=\"204\" cy=\"16\" r=\"2.8\" fill=\"#E11D48\"/><text x=\"202\" y=\"18\" fill=\"#FFFFFF\" font-family=\"sans-serif\" font-weight=\"700\" font-size=\"4\">\u00ae</text></svg>",
     categories: [
       {
@@ -1111,7 +1111,7 @@ export const CATALOG = [
     accentColor: "#CC0000",
     glowColor: "rgba(204, 0, 0, 0.4)",
     defaultImage: "/images/gan-power-chip.jpg",
-    logoImg: "/images/oem-logos/Qorvo_logo_wb.png",
+    logoImg: "/images/partners/oem-qorvo.png",
     logoSvg: "<svg viewBox=\"0 0 175 42\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><text x=\"4\" y=\"29\" fill=\"#FFFFFF\" font-family=\"'Plus Jakarta Sans', sans-serif\" font-weight=\"900\" font-size=\"28\" letter-spacing=\"-1.2\">qorvo</text><circle cx=\"21\" cy=\"9\" r=\"3.8\" fill=\"#00C853\"/><circle cx=\"100\" cy=\"29\" r=\"3.2\" fill=\"#00C853\"/></svg>",
     categories: [
       {
@@ -1415,7 +1415,7 @@ export const CATALOG = [
     accentColor: "#CC0000",
     glowColor: "rgba(204, 0, 0, 0.4)",
     defaultImage: "/images/rf-filter.jpg",
-    logoImg: "/images/oem-logos/TriTeq_logo_wb.png",
+    logoImg: "/images/partners/oem-triteq.jpg",
     logoSvg: "<svg viewBox=\"0 0 190 42\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"2\" y=\"2\" width=\"38\" height=\"38\" rx=\"9\" fill=\"rgba(244,63,94,0.18)\" stroke=\"#F43F5E\" stroke-width=\"1.8\"/><path d=\"M21 9l10 18H11l10-18z\" stroke=\"#FB7185\" stroke-width=\"2.4\" fill=\"none\"/><circle cx=\"21\" cy=\"20\" r=\"2.8\" fill=\"#F43F5E\"/><text x=\"48\" y=\"23\" fill=\"#FFFFFF\" font-family=\"'Plus Jakarta Sans', sans-serif\" font-weight=\"900\" font-size=\"17\" letter-spacing=\"1\">TRI-TEQ</text><text x=\"49\" y=\"34\" fill=\"#FB7185\" font-family=\"'Plus Jakarta Sans', sans-serif\" font-weight=\"800\" font-size=\"8\" letter-spacing=\"2\">MICROWAVE</text></svg>",
     categories: [
       {
@@ -1447,7 +1447,7 @@ export const CATALOG = [
     accentColor: "#CC0000",
     glowColor: "rgba(204, 0, 0, 0.4)",
     defaultImage: "/images/rf-switch.jpg",
-    logoImg: "/images/oem-logos/RFuW_Logo.jpg",
+    logoImg: "/images/partners/oem-rfuw-engineering.jpg",
     logoSvg: "<svg viewBox=\"0 0 200 42\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"2\" y=\"2\" width=\"38\" height=\"38\" rx=\"9\" fill=\"rgba(225,29,72,0.18)\" stroke=\"#E11D48\" stroke-width=\"1.8\"/><path d=\"M10 21h5l3-8 4.5 16 3-8h5.5\" stroke=\"#E11D48\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><text x=\"48\" y=\"23\" fill=\"#FFFFFF\" font-family=\"'Plus Jakarta Sans', sans-serif\" font-weight=\"900\" font-size=\"17\" letter-spacing=\"1\">RFuW</text><text x=\"49\" y=\"34\" fill=\"#FB7185\" font-family=\"'Plus Jakarta Sans', sans-serif\" font-weight=\"800\" font-size=\"8.5\" letter-spacing=\"2\">ENGINEERING</text></svg>",
     categories: [
       {
@@ -1607,7 +1607,7 @@ export const CATALOG = [
     accentColor: "#CC0000",
     glowColor: "rgba(204, 0, 0, 0.4)",
     defaultImage: "/images/rf-attenuator.jpg",
-    logoImg: "/images/oem-logos/Evans_logo.png",
+    logoImg: "/images/partners/oem-evans.png",
     logoSvg: "<svg viewBox=\"0 0 200 42\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"2\" y=\"2\" width=\"38\" height=\"38\" rx=\"9\" fill=\"rgba(37,99,235,0.2)\" stroke=\"#3B82F6\" stroke-width=\"1.8\"/><path d=\"M13 20h5m0-8v16m8-16v16m0-8h5\" stroke=\"#60A5FA\" stroke-width=\"2.5\" stroke-linecap=\"round\"/><text x=\"48\" y=\"20\" fill=\"#93C5FD\" font-family=\"'Plus Jakarta Sans', sans-serif\" font-weight=\"800\" font-size=\"10\" letter-spacing=\"1.4\">QUANTIC</text><text x=\"48\" y=\"34\" fill=\"#FFFFFF\" font-family=\"'Plus Jakarta Sans', sans-serif\" font-weight=\"900\" font-size=\"15\" letter-spacing=\"0.8\">EVANS / EULEX</text></svg>",
         categories: [
       {
@@ -2298,6 +2298,7 @@ export const CATALOG = [
     accentColor: "#CC0000",
     glowColor: "rgba(204, 0, 0, 0.4)",
     defaultImage: "/images/rf-microwave-pcb.jpg",
+    logoImg: "/images/partners/oem-transline-technology.png",
     logoSvg: "<svg viewBox=\"0 0 220 42\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"2\" y=\"2\" width=\"38\" height=\"38\" rx=\"9\" fill=\"rgba(245,158,11,0.2)\" stroke=\"#F59E0B\" stroke-width=\"1.8\"/><path d=\"M12 21h8l4-9 4 18 4-9h8\" stroke=\"#FBBF24\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><text x=\"48\" y=\"21\" fill=\"#FFFFFF\" font-family=\"'Plus Jakarta Sans', sans-serif\" font-weight=\"900\" font-size=\"14.5\" letter-spacing=\"0.5\">TRANSLINE</text><text x=\"48\" y=\"34\" fill=\"#FBBF24\" font-family=\"'Plus Jakarta Sans', sans-serif\" font-weight=\"800\" font-size=\"7.5\" letter-spacing=\"1.5\">RF/MW PCB TECH</text></svg>",
     categories: [
       {
